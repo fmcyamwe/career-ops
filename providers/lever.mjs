@@ -61,6 +61,7 @@ export default {
     if (!apiUrl) throw new Error(`lever: cannot derive API URL for ${entry.name}`);
     assertLeverUrl(apiUrl);
     const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
+    //console.log(`fetch::LEVER ${apiUrl} >> ${entry.name} \n`);
     if (!Array.isArray(json)) return [];
     return json.map(j => ({
       title: j.text || '',

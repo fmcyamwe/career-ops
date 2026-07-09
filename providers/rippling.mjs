@@ -71,6 +71,7 @@ export default {
 
   async fetch(entry, ctx) {
     const slug = resolveSlug(entry);
+    //console.log(`OUUH WEE rippling fetch for: ${entry.careers_url} with slug== ${slug} \n`);
     if (!slug) throw new Error(`rippling: cannot derive API URL for ${entry.name}`);
     const apiUrl = apiUrlForSlug(slug);
     assertRipplingApiUrl(apiUrl);

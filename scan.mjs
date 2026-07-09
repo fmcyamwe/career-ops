@@ -1444,7 +1444,9 @@ async function main() {
       let jobs;
       try {
         jobs = await provider.fetch(company, ctx);
+        //console.log(`OUUH WEE after providers fetch for: ${company.name} with jobs== ${jobs.length} \n`);
       } catch (parserErr) {
+        console.log(`OUUH WEE CATCH providers fetch for: ${company.name} with provider== ${provider.id} \n`);
         if (provider.id !== 'local-parser') throw parserErr;
         const fallback = resolveProvider(company, providers, { skipIds: ['local-parser'] });
         if (!fallback || fallback.error) throw parserErr;

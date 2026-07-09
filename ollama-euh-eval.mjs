@@ -25,28 +25,77 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+//import { acquireBrowser, releaseBrowser } from './browser.mjs';
+
 
 try {
   const { config } = await import('dotenv');
   config();
 } catch { /* dotenv optional */ }
 
+const ROOT = dirname(fileURLToPath(import.meta.url));
+
 const LIVENESS_CONTEXT_OPTIONS = { //UA to get past bots..
   userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   locale: 'en-US',
 };
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:  join(ROOT, 'modes', '_shared.md'),
-  oferta:  join(ROOT, 'modes', 'oferta.md'),
-  cv:      join(ROOT, 'cv.md'),
-  reports: join(ROOT, 'reports'),
+  shared:   join(ROOT, 'modes', '_shared.md'),
+  oferta:   join(ROOT, 'modes', 'oferta.md'),
+  profile:  join(ROOT, 'modes', '_profile.md'),
+  cv:       join(ROOT, 'cv.md'),
+  cprofile: join(ROOT, 'config', 'profile.yml'),
+  reports:  join(ROOT, 'reports'),
 };
+
+// ---------------------------------------------------------------------------
+// File helpers
+// ---------------------------------------------------------------------------
+
+function fileExists(relPath) {
+  return existsSync(join(ROOT, relPath));
+}
+
+function readFile(relPath) {
+  try { return readFileSync(relPath, 'utf-8').trim(); } //join(ROOT, relPath)
+  catch { return null; }
+}
+
+/**
+ * Read a file and return its trimmed contents, or a placeholder if missing.
+ * Emits a console warning when the file is absent so the user knows context is incomplete.
+ * @param {string} path - Absolute path to the file.
+ * @param {string} label - Human-readable label used in the warning and placeholder.
+ * @returns {string} File contents or a "[label not found]" placeholder.
+ */
+function getFileOrDefault(path, label) {
+  if (! fileExists(path)) { //!existsSync(path)
+    console.warn(`⚠️   ${label} not found at: ${path}`);
+    return `[${label} not found — skipping]`;
+  }
+  return readFile(path);  //readFileSync(path, 'utf-8').trim();
+}
+
+function fetchReportContents(rep) {
+  let reportContent;
+  if (fileExists(rep)){//getFileOrDefault
+    return getFileOrDefault(rep, rep);
+  }
+  //for report number
+  const numStr = String(rep).padStart(3, '0');
+  //const reportsDir = path.join(__dirname, 'reports');
+  const dirEntries = existsSync(PATHS.reports) ? readdirSync(PATHS.reports) : [];
+  const matches = dirEntries.filter(f => f.startsWith(numStr));
+  if (matches.length === 0) {
+    console.error(`Report not found: ${rep}`);
+    return null;
+  }
+  return readFile(`reports/${matches[0]}`,matches[0]);
+}
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -70,7 +119,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --file <path>    Read JD from a file instead of inline text
     --model <name>   Ollama model to use (default: llama3.3)
     --url <url>      Ollama base URL (default: http://localhost:11434)
+    --j-url <url>    job url to fetch and evaluate
     --no-save        Do not save report to reports/ directory
+    --apply <rprt_no> ummm apply...
     --help           Show this help
 
   SETUP
@@ -87,12 +138,14 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   process.exit(0);
 }
 
+
 // Parse flags
 let jdText    = '';
-let modelName = process.env.OLLAMA_MODEL || 'llama3.3';
+let modelName = process.env.OLLAMA_MODEL || 'gemma4';
 let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-let saveReport = true;
 let jUrl = '';
+let saveReport = true;
+let applyReport = '';
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -116,36 +169,21 @@ for (let i = 0; i < args.length; i++) {
     jUrl = args[++i].replace(/\/$/, '');
   } else if (args[i] === '--no-save') {
     saveReport = false;
+  } else if (args[i] === '--apply' && args[i + 1]) {
+    applyReport = args[++i]; //should be number...
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
 }
 
 if (!jdText) {
-  if (!jUrl){
-    console.error('❌  No Job Description provided. Run with --help for usage.');
-    process.exit(1);  
+  if (!jUrl && applyReport == '') {
+    console.error('❌  No Job Description or job url provided. Run with --help for usage.');
+    process.exit(1);
   }
-
+  console.warn('⚠️  Gonna use job url provided or apply?!!');
 }
 
-// ---------------------------------------------------------------------------
-// File helpers
-// ---------------------------------------------------------------------------
-/**
- * Read a file and return its trimmed contents, or a placeholder if missing.
- * Emits a console warning when the file is absent so the user knows context is incomplete.
- * @param {string} path - Absolute path to the file.
- * @param {string} label - Human-readable label used in the warning and placeholder.
- * @returns {string} File contents or a "[label not found]" placeholder.
- */
-function readFile(path, label) {
-  if (!existsSync(path)) {
-    console.warn(`⚠️   ${label} not found at: ${path}`);
-    return `[${label} not found — skipping]`;
-  }
-  return readFileSync(path, 'utf-8').trim();
-}
 
 /**
  * Determine the next zero-padded report number based on existing files in reports/.
@@ -161,82 +199,6 @@ function nextReportNumber() {
     .filter(n => !isNaN(n));
   if (files.length === 0) return '001';
   return String(Math.max(...files) + 1).padStart(3, '0');
-}
-
-async function fetchJobPage(url) {
-  //assertSafeRemoteUrl(url);
-  let chromium;
-  try {
-    ({ chromium } = await import('playwright'));
-  } catch {
-    console.warn('[fetch] Playwright unavailable — falling back to plain fetch.');
-  }
-
-  if (chromium) {
-    let browser;
-    try {
-      browser = await chromium.launch({ headless: false }); //visible with false and needed in order for Locator to work and select iframe content!
-      const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
-      //await page.addInitScript("delete Object.getPrototypeOf(navigator).webdriver") //meh nope for page
-      await context.addInitScript("Object.defineProperty(navigator, 'webdriver', { get: () => undefined })")   
-      const page = await context.newPage(); //browser
-      //(await browser.newContext()).addCookies
-      //const response =
-      await page.goto(url, { waitUntil: 'load', timeout: 30_000 }); //domcontentloaded
-      //await page.waitForTimeout(3000); // 1000 + Math.random() * 3000 wait for SPA render
-      ///umm what was issue? or is it cause of that cookie dialog? or the return?
-      //await page.click('text=Accept');
-      //waitForResponse 
-      //let b = await page.content()
-      //await page.waitForLoadState('domcontentloaded'); //bof moot
-      //await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
-      //await page.waitForLoadState('load')
-      //const overlayText = await page.evaluate(async (selector) => {
-        //const respo = await fetch(location.href);
-        //console.log('overlayText>>',respo.status); 
-        //const elt = document.querySelector(selector);
-        //return elt ? elt.textContent : null;
-      //}, ".main");//.job-post
-      //await page.click('text=Accept');
-      //const aHandle = await page.evaluateHandle(()=> document.body);
-      //const aaa = await page.evaluateHandle((body) => body?.textContent || body?.innerText, aHandle); // innerHTML
-      //await page.locator('.main').waitFor();//{ state: 'visible' } // bork when not found as timeout
-      //await page.pause()
-      const result = await page.frameLocator('#grnhse_iframe').locator(':root').evaluate(() => {
-        //return document.title; // Runs inside the iframe...AND below does work!!! smdh
-        return (document.body?.textContent).replace(/\s+/g, ' ').trim();
-      });
-      //const text = await page.evaluate(() => { //page aaa
-        //document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove()); //.cookie-banner, #cookie-modal, .gdpr-overlay'
-      //  return (document.body?.textContent || document.body?.innerText || '').replace(/\s+/g, ' ').trim();
-        //return e.replace(/\s+/g, ' ').trim();
-        //return document.querySelector(".job-post").textContent; //error out as reading null
-        
-      //}); //.then((v) => {console.log('USED>> Chromium!!!',v); return v } );
-      //const text = await page.evaluate("document.fonts.ready") //too fast 
-      //console.log('USED>> Chromium!!!', url, result,"\n"); //overlayText // , (await response.text()).valueOf())
-      return result.slice(0, 16_000); //text
-    } catch (e) {
-      console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
-    } finally {
-      console.log('Chromium!!!>>CLOSE', url, browser ? "yuppy" : "nope")
-      if (browser) await browser.close().catch(() => {});
-    }
-  }
-
-  // Plain HTTP fallback
-  try {
-    const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
-    const html = await r.text();
-    console.log('USED>> HTTP!!!', url, html)
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0);//, 16_000
-  } catch (e) {
-    throw new Error(`Could not fetch job page: ${e.message}`);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +227,213 @@ async function fetchJobPage(url) {
 `);
     process.exit(1);
   }
+  console.log(`🤖 WEEE Ollama (${hostname}), ${ROOT} >> ${PATHS.cv}  \n`)
+}
+
+function buildSystemPrompt(modeContent) {
+  
+  return [
+    //readFile(PATHS.shared, 'modes/_shared.md'), //ctx.shared,
+    readFile(PATHS.shared),//, 'modes/_shared.md'),
+    readFile(PATHS.profile), //join(ROOT, 'modes', '_profile.md'), 'modes/_profile.md'), //ctx.profileMode,
+    modeContent,
+    '---',
+    'CANDIDATE PROFILE (YAML):',
+    readFile(PATHS.cprofile),//join(ROOT, 'config', 'profile.yml'),'config/profile.yml'),
+    '---',
+    'CV (Markdown):',
+    readFile(PATHS.cv),//, 'cv.md'),
+  ].filter(Boolean).join('\n\n');
+}
+
+async function callLLM(prompt, task) {
+  const endpoint = `${baseUrl}/v1/chat/completions`;
+  const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '300000', 10);
+  
+  let evaluationText;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:    modelName,
+        messages: [
+          { role: 'system', content: prompt },
+          { role: 'user',   content: task },
+        ],
+        stream:      false,
+        temperature: 0.1, //0.4,
+        max_tokens: 8192, //4096, //bon see if sending it better than 4096 default
+        //think: true, //toUse? >meh...prolly no need
+        options: { num_ctx:64000, num_predict:64000, temperature: 0.1 }, 
+        //32768 these options?!? context? set to min of 64000?
+        //num_ctx is the total context window. num_predict is the max output tokens.
+        // otherwise, Ollama defaults to 2,048 total, leaving almost no room for output after the system prompt and conversation history consume their share.
+
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`❌  Ollama API error: HTTP ${res.status}`);
+      console.error(`    ${body.slice(0, 300)}`);
+      process.exit(1);
+    }
+
+    const data = await res.json();
+    //console.log(`🤖  WEEE REsponse Ollama (${modelName}) \n`, JSON.stringify(data));
+    evaluationText = data.choices?.[0]?.message?.content?.trim();
+    if (!evaluationText) {
+      console.error('❌  Ollama returned an empty response.');
+      process.exit(1);
+    }
+    return evaluationText;
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      console.error(`❌  Request timed out after ${Math.round(timeoutMs / 1000)}s.`);
+      console.error(`    Try a smaller/faster model, or increase OLLAMA_TIMEOUT_MS.`);
+    } else {
+      console.error(`❌  Ollama API call failed: ${err.message}`);
+    }
+    process.exit(1);
+  }
+}
+
+// -- APPLY --tellement laid!
+async function cmdApply(ref) {
+  const modeContent = readFile('modes/apply.md') ?? '';
+
+  let reportContent = fetchReportContents(ref);
+  if (!reportContent){
+    console.error('Could not read report content.');
+    process.exit(1);
+  }
+
+  const systemPrompt = buildSystemPrompt(modeContent);
+  console.log('Generating application from answers...\n\n Prompt: \n',systemPrompt );
+
+  let result;
+  try {
+    result = await callLLM(
+      systemPrompt,
+      `Generate application form answers based on this evaluation report:\n\n${reportContent}`
+    );
+  } catch (e) {
+    console.error(`OpenRouter error: ${e.message}`);
+    return;
+  }
+
+  console.log('\n─── APPLICATION ANSWERS ─────────────────────────────\n');
+  console.log(result);
+  console.log('\n─────────────────────────────────────────────────────\n');
+  return result;
+}
+
+async function createPageProvider(url) {
+  //import { acquireBrowser, releaseBrowser } from './browser.mjs';
+  ///huh borks when doing above import
+  let handle, acquireBrowser, releaseBrowser ;
+  ({acquireBrowser, releaseBrowser } = await import('./browser.mjs'));
+  
+
+  try {
+    handle = await acquireBrowser({ headless: true });
+  }catch {
+    console.warn('[acquireBrowser] Playwright unavailable — falling back to plain fetch.');
+  }
+
+  const { browser, remote } = handle;
+  if (remote) console.log(`🔌 Connected to browser via CDP: ${process.env.CDP_URL}`);
+
+  if (browser) {
+    try {
+      const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
+      const page = await context.newPage();
+
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.waitForTimeout(3000); //1000 + Math.random() * 3000 wait for SPA render
+      //await page.waitForSelector('.product');
+      const text = await page.evaluate(() => {
+        //console.log('Chromium! > \n', document.body?.innerText,"\n\n\n", document.body?.textContent || 'NONE:(')
+        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+        return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+      console.log('USED>> Chromium!!!', url, text)
+      return text.slice(0, 16_000);    
+    }catch (e) {
+      console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
+    } finally {
+      //if (browser) await browser.close().catch(() => {});
+      await browser.close();
+      await releaseBrowser(handle);
+    }
+  }
+
+  // Plain HTTP fallback
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    const html = await r.text();
+    console.log('USED>> HTTP!!!', url, html)
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16_000);
+  } catch (e) {
+    throw new Error(`Could not fetch job page: ${e.message}`);
+  }
+}
+
+async function fetchJobPage(url) {
+  //assertSafeRemoteUrl(url);
+  let chromium;
+  try {
+    ({ chromium } = await import('playwright'));
+  } catch {
+    console.warn('[fetch] Playwright unavailable — falling back to plain fetch.');
+  }
+
+  if (chromium) {
+    let browser;
+    try {
+      browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.waitForTimeout(3000); //3000 wait for SPA render--1000 + Math.random() * 3000
+      
+      const text = await page.evaluate(() => {
+        //console.log('Chromium! > \n', document.body?.innerText,"\n\neeeeeeee ----\n", document.body?.textContent || 'NADA')
+        //.cookie-banner, #cookie-modal, .gdpr-overlay
+        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+        return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+      console.log('USED>> Chromium!!!', url, text)
+      return text.slice(0, 16_000);
+    } catch (e) {
+      console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+  }
+
+  // Plain HTTP fallback
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    const html = await r.text();
+    console.log('USED>> HTTP!!!', url, html)
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16_000);
+  } catch (e) {
+    throw new Error(`Could not fetch job page: ${e.message}`);
+  }
+}
+
+if (applyReport !== ''){ //toRefactor!!
+  console.log(`🤖  huh applyReport... (${applyReport})..`);
+  await cmdApply(applyReport);
+  process.exit(0); //huh cant return
 }
 
 if(jUrl !== '') {
@@ -272,9 +441,7 @@ if(jUrl !== '') {
   ///bon issue of bot blocking smh
   const content = await fetchJobPage(jUrl); //createPageProvider(jUrl); //
   jdText = `jURL: ${jUrl}\n\n${content}`;
-  console.log(`🤖  jUrl...YeeeYuh (${jdText})..`);
-
-  process.exit(0); //meh for testing
+  //console.log(`🤖  jUrl...YeeeYuh (${jdText})..`);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +460,7 @@ try {
 `);
   process.exit(1);
 }
+
 
 // ---------------------------------------------------------------------------
 // Load context files
@@ -348,6 +516,8 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 // ---------------------------------------------------------------------------
 // Call Ollama
 // ---------------------------------------------------------------------------
+
+
 const endpoint = `${baseUrl}/v1/chat/completions`;
 const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '300000', 10);
 if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
@@ -355,10 +525,16 @@ if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
   process.exit(1);
 }
 
-console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n`);
+console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n\n`);
+  //${systemPrompt} \n\n AND ${jdText}`);
 
 let evaluationText;
-try {
+evaluationText = await callLLM(
+      systemPrompt,
+      `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`,
+    );
+
+/*try {
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -370,8 +546,13 @@ try {
       ],
       stream:      false,
       temperature: 0.1, //0.4,
-      //max_tokens: 8192, //4096, //bon see if sending it better than 4096 default
-      options: { num_ctx:64000, num_predict:64000, temperature: 0.1  }, //num_ctx: 32768
+      max_tokens: 8192, //4096, //bon see if sending it better than 4096 default
+      //think: true, //toUse? >meh...prolly no need
+      options: { num_ctx:64000, num_predict:64000, temperature: 0.1 }, 
+      //32768 these options?!? context? set to min of 64000?
+      //num_ctx is the total context window. num_predict is the max output tokens.
+      // otherwise, Ollama defaults to 2,048 total, leaving almost no room for output after the system prompt and conversation history consume their share.
+
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -384,6 +565,7 @@ try {
   }
 
   const data = await res.json();
+  //console.log(`🤖  WEEE REsponse Ollama (${modelName}) \n`, JSON.stringify(data));
   evaluationText = data.choices?.[0]?.message?.content?.trim();
   if (!evaluationText) {
     console.error('❌  Ollama returned an empty response.');
@@ -397,7 +579,7 @@ try {
     console.error(`❌  Ollama API call failed: ${err.message}`);
   }
   process.exit(1);
-}
+}*/
 
 // ---------------------------------------------------------------------------
 // Display evaluation
@@ -428,9 +610,12 @@ if (summaryMatch) {
   score      = extract('SCORE');
   archetype  = extract('ARCHETYPE');
   legitimacy = extract('LEGITIMACY');
+} else{
+  console.log('NO summaryMatch!!! :(:( \n');
+  //should just exit or retry...toReview**
 }
 
-// ---------------------------------------------------------------------------
+// -------------------------------ß--------------------------------------------
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {

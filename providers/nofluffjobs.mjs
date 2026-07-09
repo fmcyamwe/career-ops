@@ -152,6 +152,7 @@ export default {
         },
         redirect: 'error',
       });
+      //console.log(`OUUH WEE nofluffjobs fetch for: ${url} with jobs== ${jobs.length} \n`);
       for (const job of parseNoFluffJobsResponse(json)) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);

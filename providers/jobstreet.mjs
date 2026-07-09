@@ -203,6 +203,8 @@ export default {
       const data = Array.isArray(json?.data) ? json.data : [];
       if (data.length === 0) break;
 
+      //console.log(`OUUH WEE jobstreet fetch for: ${searchUrl} with jobs== ${data.length} \n`);
+
       for (const item of data) {
         const job = parseJobstreetItem(item, origin, fallbackCompany);
         if (job) allJobs.push(job);
