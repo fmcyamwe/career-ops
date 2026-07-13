@@ -90,6 +90,7 @@ export async function POST(req: Request) {
   // (remember → /api/memory, setStatus → /api/status), never the CLI editing
   // files directly. Scope its tools so it can advise (read) but not blind-write.
   const isClaude = cliId === "claude";
+  const isOllama = cliId === "ollama";
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
   const args = isClaude
@@ -107,9 +108,64 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task",
       ]
-    : spec.args(prompt);
+    : isOllama 
+    ? //[
+      //  "-p",
+      //  prompt,
+        //"--output-format",
+        //"stream-json",
+        //"--verbose",
+        //"--include-partial-messages",
+        //"--permission-mode",
+        //"acceptEdits",
+        //"--allowedTools",
+        //"Read,WebFetch,Glob,Grep",
+        //"--disallowedTools",
+        //"Bash,Write,Edit,NotebookEdit,Task",
+      //]
+      //spec.args(prompt)
+      //['serve']
+      /*[
+        "http://localhost:11434/v1/chat/completions",  //http://localhost:11434/api/chat >>not as complete response and not accessed the same way
+        //"-H",
+        //"Content-Type: application/json",
+        "-d",
+        `{
+          "model": "gemma4",
+          "messages": [{
+            "role": "user",
+            "content": "${message}"
+          }],
+          "think": false,
+          "stream": false,
+          "format": "json"
+        }`//toSee with format json >>meh prolly helps
+      ]*/ //worked..toSee with script below
+     [
+      //'../../../lib/ollama-test.mjs',//sheesh nah
+      'ollama-test.mjs',
+      //"--dry-run", //toReview** not passing in system prompt here
+      '--question',
+      `${message}`
+    ]
+    : 
+    spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  console.log(`🤖  assistant::POST...args....\n`,isOllama,args);//careerOpsRoot(),prompt
+  
+  const child = isOllama 
+  ?
+  //spawn(`ollama`, args) //`${binPath} serve` //binPath+" "+'serve' 
+  //>>child process runs without spawn cmd options? tho cwd defaults to current working directory anyway? >> still error out with ENOENT...
+  //// need to run straight cmd instead? >>yup works with spawn(`ollama`, ['serve'])
+  //spawn(`curl`, args)  //works!
+  //spawn(binPath, ['serve']) //huh also works with binPath as /opt/homebrew/bin/ollama BUT 500 error trying to load model
+  spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+  //huh complains when last 'pipe' was 'ipc'...
+  // yeeeyuh works and output captured with the 'stdio' options even! also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
+  :
+  spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env })
+  ;
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -129,6 +185,7 @@ export async function POST(req: Request) {
         }
       }, 90_000);
       const safeClose = () => {
+        //console.log(`🤖  stream::.safeClose....${closed}\n`);
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
@@ -140,6 +197,7 @@ export async function POST(req: Request) {
         }
       };
       const safeEnqueue = (s: string): boolean => {
+        console.log(`🤖  stream::apiAssistant::safeEnqueue....${s}\n ${closed}`);
         if (closed || !s) return false;
         try {
           controller.enqueue(encoder.encode(s));
@@ -150,10 +208,27 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
+        console.log(`🤖  stream::apiAssistant::onEmit....${s} \n`);
+        //here should try and proper parsing >> 
+        if(isOllama){
+          //const args = JSON.parse(s);
+          let oContent;
+          try { 
+            oContent = JSON.parse(s); 
+            //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            if (safeEnqueue(oContent)) emitted = true;
+          } catch {
+            //handle error?!? retry?
+            console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! ${oContent} \n ${s} \n`);
+          }
+          return
+        }
+        
         if (safeEnqueue(s)) emitted = true;
       };
 
       child.stdout.on("data", (d: Buffer) => {
+        console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);//closed,isClaude
         if (closed) return;
         if (!isClaude) {
           emit(d.toString());
@@ -179,6 +254,8 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
+        //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
@@ -188,7 +265,7 @@ export async function POST(req: Request) {
         safeClose();
       });
       child.on("close", () => {
-        if (!emitted) {
+        if (!emitted) { //when process.exit(1) invoked without passing anyting to parent
           safeEnqueue("_(no output — is the CLI authenticated?)_");
         }
         safeClose();

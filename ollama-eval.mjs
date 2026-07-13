@@ -34,6 +34,7 @@ try {
 const LIVENESS_CONTEXT_OPTIONS = { //UA to get past bots..
   userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
   locale: 'en-US',
+  //viewport: { width: 1280, height: 900 } //toTry**
 };
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -89,7 +90,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
 // Parse flags
 let jdText    = '';
-let modelName = process.env.OLLAMA_MODEL || 'llama3.3';
+let modelName = process.env.OLLAMA_MODEL || 'gemma4';
 let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
 let saveReport = true;
 let jUrl = '';
@@ -177,6 +178,8 @@ async function fetchJobPage(url) {
     try {
       browser = await chromium.launch({ headless: false }); //visible with false and needed in order for Locator to work and select iframe content!
       const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
+      //toTry? const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+
       //await page.addInitScript("delete Object.getPrototypeOf(navigator).webdriver") //meh nope for page
       await context.addInitScript("Object.defineProperty(navigator, 'webdriver', { get: () => undefined })")   
       const page = await context.newPage(); //browser
@@ -184,7 +187,7 @@ async function fetchJobPage(url) {
       //const response =
       await page.goto(url, { waitUntil: 'load', timeout: 30_000 }); //domcontentloaded
       //await page.waitForTimeout(3000); // 1000 + Math.random() * 3000 wait for SPA render
-      ///umm what was issue? or is it cause of that cookie dialog? or the return?
+      await page.setViewportSize({ width: 1200, height: 1822 })
       //await page.click('text=Accept');
       //waitForResponse 
       //let b = await page.content()
@@ -202,7 +205,7 @@ async function fetchJobPage(url) {
       //const aHandle = await page.evaluateHandle(()=> document.body);
       //const aaa = await page.evaluateHandle((body) => body?.textContent || body?.innerText, aHandle); // innerHTML
       //await page.locator('.main').waitFor();//{ state: 'visible' } // bork when not found as timeout
-      //await page.pause()
+      await page.pause()
       const result = await page.frameLocator('#grnhse_iframe').locator(':root').evaluate(() => {
         //return document.title; // Runs inside the iframe...AND below does work!!! smdh
         return (document.body?.textContent).replace(/\s+/g, ' ').trim();

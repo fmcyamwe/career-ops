@@ -22,6 +22,7 @@ export const KNOWN: CliSpec[] = [
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
   { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p] },
   { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
+  { id: "ollama", name: "Ollama CLI", bin: "ollama", run: "ollama serve", url: "https://ollama.com", args: (p) => ["-p", p] }, //serve OLLAMA_CONTEXT_LENGTH ?  url is for install...  
 ];
 
 function searchDirs(): string[] {
@@ -47,7 +48,9 @@ function searchDirs(): string[] {
     );
   }
   const fromPath = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
-  return [...new Set([...fromPath, ...extra])];
+  let c = [...new Set([...fromPath, ...extra])];
+  //console.log(`🤖  searchDirs...\n`,[...c].reverse());
+  return [...c].reverse(); //proper linking for ollama
 }
 
 // On Windows, executables carry an extension (claude.exe, claude.cmd, ...).
@@ -76,6 +79,9 @@ export function findBin(bin: string, dirs = searchDirs()): string | null {
         return p;
       } catch {
         /* not here */
+        //console.log(`🤖  findBin...Error access....\n`,bin, p);
+        //bon permission issue for ollama..also pointing in wrong place? as should pointt to /opt/homebrew/bin/ollama 
+        //cause env PATH matches with /usr/local/bin/ollama first smh
       }
     }
   }
@@ -92,8 +98,11 @@ export function detectClis() {
 
 export function resolveCli(id: string): { spec: CliSpec; binPath: string } | null {
   const spec = KNOWN.find((c) => c.id === id);
+  //console.log(`🤖  resolveCli...access??....\n`,id);
   if (!spec) return null;
   const binPath = findBin(spec.bin);
+  //console.log(`🤖  resolveCli...access....\n`,spec.bin, binPath); 
+  // //ollama /opt/homebrew/bin/ollama
   if (!binPath) return null;
   return { spec, binPath };
 }

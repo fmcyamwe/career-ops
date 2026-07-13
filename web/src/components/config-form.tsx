@@ -53,9 +53,12 @@ export function ConfigForm() {
         if (v.cliId) setCliId(v.cliId);
         if (v.provider) setProvider(v.provider);
         if (typeof v.logos === "boolean") setLogos(v.logos);
-      }
+      } //else {
+        //console.log(`🤖  Calling Ollama noooope....\n\n`);
+      //}
     } catch {
       /* ignore */
+      console.log(`🤖  Config...Error storage_key....\n\n`);
     }
   }, []);
 
@@ -116,7 +119,7 @@ export function ConfigForm() {
           icon={TerminalSquare}
           title="No setup needed"
           hint="Coming soon"
-          disabled
+          
         />
       </div>
 

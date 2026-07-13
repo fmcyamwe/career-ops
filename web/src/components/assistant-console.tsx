@@ -405,7 +405,7 @@ export function AssistantConsole() {
           }
         }
       }
-      if (!acc.trim()) setStreamText("_(no output — is the CLI authenticated?)_");
+      if (!acc.trim()) setStreamText("_(no output — is the CLI authenticated?!?)_");
     } catch {
       setStreamText("⚠️ Connection error.");
     } finally {

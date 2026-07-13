@@ -110,6 +110,7 @@ export async function POST(req: Request) {
   const prompt = buildPrompt(kind, input, readMemory(), today);
 
   const isClaude = cliId === "claude";
+  const isOllama = cliId === "ollama";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate' runs the REAL mode + persists canonical artifacts →
   // it needs Write + Bash (reserve-report-num / merge-tracker / write the
@@ -124,6 +125,31 @@ export async function POST(req: Request) {
        "--permission-mode", "acceptEdits",
        "--allowedTools", tools.allowed,
        "--disallowedTools", tools.disallowed]
+    : isOllama ?
+    /*["http://localhost:11434/v1/chat/completions",
+      "-d",
+      `{
+        "model": "gemma4",
+        "messages": [{
+          "role": "user",
+          "content": "${input}"
+        }],
+        "think": false,
+        "stream": false,
+        "format": "json"
+      }`
+    ]*/
+   [
+      //'../../../lib/ollama-test.mjs',//sheesh nah
+      'ollama-test.mjs', //resolves to root /web/ollama-test.mjs but sometimes to web/
+      //"--dry-run",
+      "--prompt",
+      prompt, //would it be able to read files? nope this would be a tool call
+      '--question',
+      `${input}`,
+      "--allowedTools", tools.allowed, //meh just to see
+      "--disallowedTools", tools.disallowed
+    ]
     : spec.args(prompt);
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
@@ -142,7 +168,15 @@ export async function POST(req: Request) {
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${writeToken}....\n`,reportsBefore);//prompt
+  ///Users/florentcyamweshi/Downloads/career-ops
+
+  const child = isOllama ? 
+  //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
+  spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+  : 
+  spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
@@ -158,14 +192,16 @@ export async function POST(req: Request) {
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
       // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 720_000 : 285_000;
+      const killMs = kind === "pdf" ? 720_000 : 720_000; //meh //285_000;
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
+
       const send = (obj: unknown) => {
         if (closed) return;
         try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
       };
+
       const close = () => {
         if (!closed) {
           closed = true;
@@ -176,12 +212,28 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (d: Buffer) => {
+        console.log(`🤖  stream::apiRun::onData....${d.byteLength} \n`,closed,isOllama);
         if (closed) return;
+        if (isOllama){
+          let oContent;
+          try { 
+            //buf += d.toString(); //umm add to buf? >>naah prolly not?
+            oContent = JSON.parse(d.toString()); //buf
+            //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            emittedText = true;
+            send({ type: "text", text: oContent });
+          } catch {
+            //handle error?!? retry?
+            console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! ${oContent} \n ${d.toString()} \n`);
+          }
+          return;
+        }
         if (!isClaude) {
           emittedText = true;
           send({ type: "text", text: d.toString() });
           return;
         }
+
         buf += d.toString();
         let nl: number;
         while ((nl = buf.indexOf("\n")) !== -1) {
@@ -215,6 +267,7 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        console.log(`🤖  stream::apiRun::onData Errr....${s} \n`); 
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {

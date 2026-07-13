@@ -398,7 +398,7 @@ async function fetchJobPage(url) {
     try {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
       await page.waitForTimeout(3000); //3000 wait for SPA render--1000 + Math.random() * 3000
       
       const text = await page.evaluate(() => {
@@ -619,6 +619,7 @@ if (summaryMatch) {
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
+  //let reportSaved = false; //for invoking 'merge-tracker.mjs' to add tracker but too much wahala as script read info from file >> batch/tracker-additions/${num}-${companySlug}.tsv
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
