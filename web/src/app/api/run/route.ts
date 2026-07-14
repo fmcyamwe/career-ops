@@ -141,14 +141,20 @@ export async function POST(req: Request) {
     ]*/
    [
       //'../../../lib/ollama-test.mjs',//sheesh nah
-      'ollama-test.mjs', //resolves to root /web/ollama-test.mjs but sometimes to web/
-      //"--dry-run",
-      "--prompt",
-      prompt, //would it be able to read files? nope this would be a tool call
+      //'ollama-test.mjs', //resolves to where spawn cmd's cwd is set
+      ////"--dry-run",
+      'run',
+      'agent.py',
       '--question',
       `${input}`,
-      "--allowedTools", tools.allowed, //meh just to see
-      "--disallowedTools", tools.disallowed
+      "--prompt",
+      prompt, //would it be able to read files? nope gotta add tool calls
+      "--allowedTools",//meh not used
+      tools.allowed, 
+      "--disallowedTools", 
+      tools.disallowed,
+      '--fromP',
+      'run',
     ]
     : spec.args(prompt);
 
@@ -168,12 +174,13 @@ export async function POST(req: Request) {
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${writeToken}....\n`,reportsBefore);//prompt
+  console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
   ///Users/florentcyamweshi/Downloads/career-ops
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
-  spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+  //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //path.join(careerOpsRoot(), "seeds")
   : 
   spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -217,14 +224,15 @@ export async function POST(req: Request) {
         if (isOllama){
           let oContent;
           try { 
-            //buf += d.toString(); //umm add to buf? >>naah prolly not?
+            //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
             oContent = JSON.parse(d.toString()); //buf
             //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            oContent = oContent.output ?? "";
             emittedText = true;
             send({ type: "text", text: oContent });
           } catch {
             //handle error?!? retry?
-            console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! ${oContent} \n ${d.toString()} \n`);
+            console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`);
           }
           return;
         }
@@ -265,9 +273,10 @@ export async function POST(req: Request) {
           }
         }
       });
+
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        console.log(`🤖  stream::apiRun::onData Errr....${s} \n`); 
+        console.log(`🤖  stream::apiRun::onData Errr....${s} \n`); //todo** save input_tokens for Ollama here! into 'lastTokens'
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
@@ -275,13 +284,20 @@ export async function POST(req: Request) {
           send({ type: "error", msg: s.trim().slice(0, 200) });
         }
       });
+
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
+
       child.on("close", (code) => {
         const wroteReport = countReports() > reportsBefore;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
+        console.log(`🤖  stream::apiRun::onClose >> cleanExit? ${cleanExit} 
+          <> emittedText: ${emittedText} 
+          <> anyError?: ${sawError}
+          <> tokens: ${lastTokens} <--> ${lastCostUsd} \n\n`); 
+
         if (!emittedText && !sawError && !cleanExit) {
           send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
         } else if (!emittedText && !sawError) {

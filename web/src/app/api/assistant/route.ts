@@ -140,18 +140,29 @@ export async function POST(req: Request) {
           "stream": false,
           "format": "json"
         }`//toSee with format json >>meh prolly helps
-      ]*/ //worked..toSee with script below
-     [
-      //'../../../lib/ollama-test.mjs',//sheesh nah
-      'ollama-test.mjs',
-      //"--dry-run", //toReview** not passing in system prompt here
-      '--question',
-      `${message}`
-    ]
+      ]*/ //worked...script below better
+      //[
+        //'../../../lib/ollama-test.mjs',//sheesh nah
+      //  'ollama-test.mjs',
+        //"--dry-run", //toReview** not passing in system prompt here
+      //  '--question',
+      //  `${message}`
+      //] //toSee* with below
+      [
+        'run',
+        'agent.py',
+        '--question',
+        `${message}`,
+        '--prompt',
+        `${prompt}`,
+        '--fromP',
+        'assistant',
+        //also allowedTools && disallowedTools? prolly...todo**
+      ]
     : 
     spec.args(prompt);
 
-  console.log(`🤖  assistant::POST...args....\n`,isOllama,args);//careerOpsRoot(),prompt
+  console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`);//args //,prompt
   
   const child = isOllama 
   ?
@@ -160,12 +171,13 @@ export async function POST(req: Request) {
   //// need to run straight cmd instead? >>yup works with spawn(`ollama`, ['serve'])
   //spawn(`curl`, args)  //works!
   //spawn(binPath, ['serve']) //huh also works with binPath as /opt/homebrew/bin/ollama BUT 500 error trying to load model
-  spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
-  //huh complains when last 'pipe' was 'ipc'...
-  // yeeeyuh works and output captured with the 'stdio' options even! also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
+  //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //yeeeeeyuh!!
+  //huh complains when last 'pipe' was 'ipc'...but not for third 'pipe'..huh?
+  // yeeeyuh works and with the 'stdio' options output captured via console.log! 
+  // also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
+  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
   :
-  spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env })
-  ;
+  spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -185,7 +197,6 @@ export async function POST(req: Request) {
         }
       }, 90_000);
       const safeClose = () => {
-        //console.log(`🤖  stream::.safeClose....${closed}\n`);
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
@@ -208,7 +219,7 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
-        console.log(`🤖  stream::apiAssistant::onEmit....${s} \n`);
+        console.log(`🤖  stream::apiAssistant::onEmit....\n ${s}`);
         //here should try and proper parsing >> 
         if(isOllama){
           //const args = JSON.parse(s);
@@ -216,10 +227,11 @@ export async function POST(req: Request) {
           try { 
             oContent = JSON.parse(s); 
             //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            oContent = oContent.output ?? ""; 
             if (safeEnqueue(oContent)) emitted = true;
           } catch {
             //handle error?!? retry?
-            console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! ${oContent} \n ${s} \n`);
+            console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
           }
           return
         }
@@ -261,6 +273,7 @@ export async function POST(req: Request) {
         }
       });
       child.on("error", (e) => {
+        console.log(`🤖  stream::apiAssistant::onError....${e.message} \n`); 
         safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
         safeClose();
       });

@@ -154,6 +154,7 @@ let question = "";
 let prompt = '';
 let allowedTls = '';
 let disallowedTls = '';
+let from = 'assistant'; //default..huh isnt 'from' a reserved keyword?
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--question' && args[i + 1]) {
@@ -164,6 +165,8 @@ for (let i = 0; i < args.length; i++) {
     allowedTls = args[++i];
   } else if (args[i] === '--disallowedTools' && args[i + 1]) {
     disallowedTls = args[++i];
+  } else if (args[i] === '--from' && args[i + 1]) {
+    from = args[++i];
   }
 }
 
@@ -181,7 +184,7 @@ function getTemperature({city}) { //: string
   return temperatures[city] ?? 'Unknown'
 }
 
-async function fetchJobPage({url}) { //prolly {url}
+async function fetchJobPage({url}) {
   //assertSafeRemoteUrl(url);
   let chromium;
   try {
@@ -425,6 +428,7 @@ let evaluationText;
 evaluationText = await llmOrchestrator(
       //systemPrompt,
       //`JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`,
+      //todo** USE from below**
       prompt == '' ? "You are a helpful assistant." : prompt ,
       prompt == '' ? question : `JOB URL TO EVALUATE: ${question}`,
     );

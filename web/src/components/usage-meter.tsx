@@ -54,8 +54,8 @@ export function UsageMeter() {
     };
   }, []);
 
-  // The usage source is Claude's local logs; only meaningful when Claude is the CLI.
-  if (cli && cli !== "claude") return null;
+  // The usage source is Claude's local logs; only meaningful when Claude is the CLI.--smh okay
+  //if (cli && cli !== "claude") return null;
   if (!data) return null;
 
   const rows = [
