@@ -2,6 +2,8 @@
 # dependencies = [
 #   "beautifulsoup4",
 #   "pydantic_ai",
+#   "pydantic-ai-slim[duckduckgo]",
+#   "pydantic-ai-slim[web-fetch]",
 #   "pydantic_ai_harness",
 #   "datetime",
 #   "dataclasses",
@@ -12,21 +14,33 @@
 import argparse
 import json
 import sys
-#import logging
+import logging
 from pathlib import Path
 #from bs4 import BeautifulSoup
 from datetime import date
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, capture_run_messages
+from pydantic_ai.capabilities import WebFetch, WebSearch
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
-from pydantic_ai_harness import Shell #toSee
+from pydantic_ai_harness import Shell, FileSystem #toSee
+from pydantic_ai_harness.subagents import SubAgent, SubAgents
 from seeds.tool_output import Fruit, Vehicle #huh?
 
+''' bof
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),      # Writes to file
+        logging.StreamHandler(sys.stdout)    # Writes to console
+    ]
+)
+'''
 
 model = OllamaModel(
     'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'max_tokens': 8192, 'temperature': 0.1, 'timeout': 3_000,'tool_choice':'auto'} #umm timeout and tool_choice ?
+    settings={'max_tokens': 8192, 'temperature': 0.1, 'timeout': 3_000,'tool_choice':'auto'}
 )
 
 ''' #oldie
@@ -37,7 +51,29 @@ agent = Agent(
 )
 '''
 
-agent = Agent(model,deps_type=str,instructions="")
+agent = Agent(
+  model,
+  deps_type=str,
+  instructions="",
+  capabilities=[
+    FileSystem(root_dir='.'),
+    WebSearch(local='duckduckgo'),
+    WebFetch(local=True),
+    Shell(cwd='.')
+    ])
+#dirr = Path(__file__).parent #ToSee if should use above...
+
+##Shell(cwd='.', allowed_commands=['ls', 'node', 'cd']), ##huh with allowed_commands borks with ValueError::'Specify allowed_commands or denied_commands, not both.'
+####weird...so default denied_commands but cant set allowed_commands too!?! weiiird!
+
+'''
+fileReader = Agent(
+  model,
+  name='fileReader', 
+  description='Read and return the content of a file'
+)
+'''
+
 agenty =Agent() 
 #could do empty agent and then redeclare it with sys prompts?..@annotations decorators below need instance smh
 ##THo...can forgo them and set in Agent arguments?(for Tools!)
@@ -76,49 +112,69 @@ def get_date(q) -> str: #synchronous
 def ask_question(q, instructions) -> str:
   result = agent.run_sync(instructions, deps='Frank')  #q, instructions=instructions
   #HUH using the instructions as user_prompt only makes for better response!!
-  # #all_messages() cant be json serialized so using all_messages_json()--toSee** if messages dont lose their type(prolly ok if == 'part_kind' ?)
-  sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Ask", result.usage,result.all_messages_json().decode('utf-8'))) # str(content,'utf-8')
+  # #all_messages() cant be json serialized so using all_messages_json() > messages dont lose their type(prolly ok if == 'part_kind' ?)
+  #sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Ask", result.usage,result.all_messages_json().decode('utf-8') )) # str(content,'utf-8')
+  sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Asky", result.usage,result.all_messages() )) 
   return result.output
+
+## for when need subagents? wonder if ok to declare them here?
+##could filter more frmTask to allow more Tools?
+def delegate_question(prompt, frmTask) -> str:
+  #fileReader = Agent(
+  #  model,
+  #  name='fileReader', 
+  #  description='Read and return the content of a file'
+  #  )#think this subagent causes too many issues--borks for writing calls?!?
+  result = agent.run_sync(prompt, deps='Frank', retries=3) #,capabilities=[SubAgents(agents=[SubAgent(fileReader)])] ) #, inherit_tools=True
+  #logging.info(" Info:Delegate:: wonder where this one goes...\n") #not shown if not debug level
+  sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Delegate",result.usage ,result.all_messages()))
+  #logging.warning('\n[%s] %s :: \n %s ...\n' % ("Delegate", frmTask, result.usage))
+  return result.output
+
+#####WebSearch(local=my_search)--toTry*** implement below
+def my_search(query: str) -> str:
+  pass
+
+def tools_question():
+  result = agent.run_sync('What tools are available?')
+  sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
+  #print([t.name for t in model.last_model_request_parameters.function_tools])
 
 ##to pass in system prompts and other stuff...prolly redundant?
 def create_agent(sys_prompt,parent) -> Agent:
   return Agent(model,deps_type=str,system_prompt=sys_prompt)
 
 def main():
-  pass
-
-if __name__ == '__main__':
-  parser = argparse.ArgumentParser(
-    description='Agent script to access local Ollama LLM')
+  parser = argparse.ArgumentParser(description='Agent script to access local Ollama LLM')
 
   parser.add_argument('--question',
-                      metavar='q', 
+                      metavar='q',
                       type=str,
-                      help='user question for Ollama model', 
+                      help='user question for Ollama model',
                       required=True)
   parser.add_argument('--prompt', 
                       metavar='p', 
                       type=str,
-                      help='system prompt', 
+                      help='system prompt',
                       required=False)
-  parser.add_argument('--allowedTools', 
+  parser.add_argument('--allowedTools',
                       metavar='a', 
                       type=str,
-                      help='Allowed Tools that Ollama model can invoke', 
+                      help='Allowed Tools that Ollama model can invoke',
                       required=False)
-  parser.add_argument('--disallowedTools', 
+  parser.add_argument('--disallowedTools',
                       metavar='d', 
                       type=str,
-                      help='Disallowed Tools that cannot be used', 
+                      help='Disallowed Tools that cannot be used',
                       required=False)
-  parser.add_argument('--fromP', 
-                      metavar='f', 
+  parser.add_argument('--fromP',
+                      metavar='f',
                       type=str,
-                      help='Calling parent script', 
+                      help='Calling parent script',
                       required=False)
 
   args = parser.parse_args()
-  question = args.question #bork with acess 'q' ...toRemove?
+  question = args.question #bork with access 'q'
   #test = get_output() #no logging :(
   #result = agent.run_sync('What is the date?', deps='Frank') # in past it was borkin cause it's synchronous! BUT works now!
   #another = get_daate() #this borked cause no await prolly?
@@ -126,16 +182,22 @@ if __name__ == '__main__':
   fromScript = args.fromP
   prompt = args.prompt
 
-  sys.stderr.write('\n[%s] %s :>: %s ...Q: %s\r' % ("Ollama", "Starting from", fromScript, question)) 
+  #sys.stderr.flush() #flush first?
+  #logging.warning("This goes to both file and console....still? \n")
+  sys.stderr.write('\n\n[%s] %s :>: %s ...Q: %s\r' % ("Ollama", "Starting from", fromScript, question)) 
   
-  #result = get_date(question)
-  result = ask_question(question,prompt)
+  result = ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
 
-  agenty = create_agent(prompt,fromScript) #toUse?
+  #agenty = create_agent(prompt,fromScript) #toUse? toTest**
   d = {'daQ':question, 'output':result }
+
+  #tools_question() #yeeeyuh
     
   #print(f' >> {question} >> {result.output}') #{test}
   #sys.stdout.write('[%s] %s%s ...%s\r' % ("bar", "percents", '%', "status"))
   #sys.stderr.write('[%s] %s%s ...%s\r' % ("bar", "percents", '%', "status")) ##yeee no error prefix!
   print(f'{return_json(d)}') ##need f to get actual string? >>nope
   #sys.stdout.flush()  #huh prolly sends everything in stdout AND print() out at same time!
+
+if __name__ == '__main__':
+  main()

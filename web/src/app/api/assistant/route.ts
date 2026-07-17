@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
 
@@ -156,13 +158,16 @@ export async function POST(req: Request) {
         '--prompt',
         `${prompt}`,
         '--fromP',
-        'assistant',
+        'api-assistant',
         //also allowedTools && disallowedTools? prolly...todo**
       ]
     : 
     spec.args(prompt);
 
-  console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`);//args //,prompt
+  console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`, args);//args //,prompt
+
+  //const errFd = fs.openSync(path.join(careerOpsRoot(), 'error.log'), 'a'); //'error.log'
+  const filePath = path.join(careerOpsRoot(), 'api-assistant.log'); //careerOpsRoot(), 'data', 'pipeline.md'
   
   const child = isOllama 
   ?
@@ -175,7 +180,7 @@ export async function POST(req: Request) {
   //huh complains when last 'pipe' was 'ipc'...but not for third 'pipe'..huh?
   // yeeeyuh works and with the 'stdio' options output captured via console.log! 
   // also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
-  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
+  spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
   :
   spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -240,7 +245,7 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (d: Buffer) => {
-        console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);//closed,isClaude
+        console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);
         if (closed) return;
         if (!isClaude) {
           emit(d.toString());
@@ -266,8 +271,9 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
+        //console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
+        fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }

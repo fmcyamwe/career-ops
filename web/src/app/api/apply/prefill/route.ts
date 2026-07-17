@@ -98,6 +98,7 @@ export async function POST(req: Request) {
           /* client gone */
         }
       };
+
       const log = (m: string) => {
         const el = Date.now() - t0;
         emit({ t: "log", m, el });
@@ -107,6 +108,7 @@ export async function POST(req: Request) {
           /* ignore */
         }
       };
+
       const fail = (m: string, raw?: string) => {
         log(`ERROR: ${m}`);
         emit({ t: "error", m, raw });
@@ -145,11 +147,14 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       log(`Planner: ${cliId} (${binPath})`);
 
       const isClaude = cliId === "claude";
+      const isOllama = cliId === "ollama";
       // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
       // faster startup (skips the user's global playwright/gmail/linear/… servers
       // the planner doesn't need; it only reads local files).
       const args = isClaude
         ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
+        : isOllama ?
+        ['run','agent.py','--question',prompt,'--prompt',prompt, '--fromP', 'applyPrefill']
         : spec.args(prompt);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
@@ -157,7 +162,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(isOllama ? 'uv' : binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
         let buf = "";
         let firstByteAt = 0;
         const hb = setInterval(() => {
@@ -168,10 +173,25 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
             firstByteAt = Date.now();
             log(`first output byte at ${Math.round((firstByteAt - t0) / 1000)}s`);
           }
+          if (isOllama){
+            let oContent;
+            try {
+              //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
+              oContent = JSON.parse(d.toString()); //buf
+              //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+              oContent = oContent.output ?? "";
+              buf += oContent;
+            } catch {
+              //handle error?!? retry?
+              console.error(`🤖  stream::apiApplyPrefill::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`, buf);
+            }
+            return;
+          }
           buf += d.toString();
         });
         child.stderr.on("data", (d: Buffer) => {
           const e = d.toString().trim();
+          console.log(`🤖  stream::apiApplyPrefill::onData Errr....${e} \n`); 
           if (e) log(`stderr: ${e.slice(0, 160).replace(/\s+/g, " ")}`);
         });
         const killer = setTimeout(() => {

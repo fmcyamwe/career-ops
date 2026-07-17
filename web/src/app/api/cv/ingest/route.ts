@@ -74,10 +74,12 @@ export async function POST(req: Request) {
       const form = await req.formData();
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
+      const isClaude_Ollama = cliId === "claude" || cliId === "ollama" ;
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
       // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
       // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
+      //cliId !== "claude" 
+      if (!isClaude_Ollama && /\.(pdf|docx)$/i.test(file.name)) {
         return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
       }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
@@ -100,6 +102,7 @@ export async function POST(req: Request) {
   const { spec, binPath } = resolved;
   const prompt = ingestPrompt(promptSource);
   const isClaude = cliId === "claude";
+  const isOllama = cliId === "ollama";
   const args = isClaude
     ? [
         "-p",
@@ -115,11 +118,22 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
       ]
+    : isOllama ?
+      [
+        'run',
+        'agent.py',
+        '--question',
+        `${promptSource}`,
+        '--prompt',
+        `${prompt}`,
+        '--fromP',
+        'cvIngest',
+      ]
     : spec.args(prompt);
 
   let child;
   try {
-    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    child = spawn(isOllama? 'uv' : binPath, args, { cwd: careerOpsRoot(), env: process.env });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
@@ -169,6 +183,21 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
+        console.log(`🤖 stream::cvIngest::onEmit....${isOllama} >> ${s} \n`);
+        if(isOllama){
+          //const args = JSON.parse(s);
+          let oContent;
+          try { 
+            oContent = JSON.parse(s); 
+            //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            oContent = oContent.output ?? ""; 
+            if (safeEnqueue(oContent)) emitted = true;
+          } catch {
+            //handle error?!? retry?
+            console.log(`🤖  stream::cvIngest::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
+          }
+          return
+        }
         if (safeEnqueue(s)) emitted = true;
       };
 
@@ -197,6 +226,7 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        console.log(`🤖  stream::cvIngest::onData Errr....${s} \n`); 
         if (/error|not found|denied|fatal/i.test(s)) safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
       });
       child.on("error", (e) => {

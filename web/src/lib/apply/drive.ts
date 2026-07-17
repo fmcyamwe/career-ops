@@ -55,14 +55,37 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
 }
 
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
-function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
-  const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+///binPath >> spawnCmd
+///prompt >> args
+function plannerTurn(spawnCmd: string, args: string[], resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
+  //const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
+  //const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(spawnCmd, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let buf = "";
-    child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
-    child.stderr.on("data", () => {});
+    child.stdout.on("data", (d: Buffer) => {
+      if (spawnCmd == 'uv'){ //should be ollama
+        let oContent;
+        try { 
+          //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
+          oContent = JSON.parse(d.toString()); //buf
+          //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+          oContent = oContent.output ?? "";
+          buf += oContent;//d.toString()
+        } catch {
+          //handle error?!? retry?
+          console.error(`🤖  onData::applyDrive>>Ollama...ERROR json!! \n ${d.toString()} \n`, buf);
+        }
+        return;
+      }
+      buf += d.toString()     
+    });
+
+    child.stderr.on("data", (d: Buffer) => {
+      const s = d.toString();
+      console.log(`🤖  stream::applyDrive::onData Errr....${s} \n`);
+    });
+
     const killer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
@@ -116,9 +139,11 @@ export async function driveSession(
 ): Promise<DriveResult> {
   const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
-  if (!resolved || cliId !== "claude") {
-    return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };
+  const isOllama = cliId === "ollama";
+  if (!resolved || cliId !== "claude" && cliId !== "ollama") {
+    return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code OR Ollama? (browser-driving CLI).", steps };
   }
+
   const shot = async () => {
     try {
       return `data:image/jpeg;base64,${(await page.screenshot({ type: "jpeg", quality: 38 })).toString("base64")}`;
@@ -164,7 +189,15 @@ ${snap.text}
 
 Reply ONE action JSON.`;
 
-    const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    let spawnCmd = isOllama ? 'uv' : resolved.binPath ; //cliId == "ollama"
+
+    const base = resumeId ? ["-p", "--resume", resumeId, prompt] : isOllama ? ['run','agent.py','--question',goalText,'--prompt',prompt, '--fromP', 'applyDrive'] : ["-p", prompt];
+    const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+    
+    console.log(`🤖  driveSession::POST....${isOllama}\n\n ${goalText} \n\n`, args);
+
+    //bon to see when passing in 'args' constructed here...ToTest* for resumeId
+    const { out, sessionId } = await plannerTurn(spawnCmd, args, resumeId);
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {
@@ -223,5 +256,6 @@ Reply ONE action JSON.`;
     lastUrl = page.url();
     void lastUrl;
   }
+
   return { reached: await isFormReady().catch(() => false), turns: budget, reason: "budget-exhausted", steps };
 }

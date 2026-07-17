@@ -58,6 +58,7 @@ export async function POST(req: Request) {
   const prompt = `${mode}${OUTPUT_CONTRACT}${memoryLine}${knownBlock}\n\n--- USER INTENT ---\n${query}\n`;
 
   const isClaude = cliId === "claude";
+  const isOllama = cliId === "ollama";
   const args = isClaude
     ? [
         "-p",
@@ -73,9 +74,20 @@ export async function POST(req: Request) {
         "--disallowedTools",
         "Bash,Write,Edit,NotebookEdit,Task", // proposer-not-writer, by construction
       ]
+    : isOllama ?
+      [
+        'run',
+        'agent.py',
+        '--question',
+        `${query}`,
+        '--prompt',
+        `${prompt}`,
+        '--fromP',
+        'apiExplore',
+      ]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawn(isOllama? 'uv' : binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -116,6 +128,22 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
+        console.log(`🤖 stream::apiExplore::onEmit....${isOllama} >> ${s} \n`);
+        if(isOllama){
+          //const args = JSON.parse(s);
+          let oContent;
+          try { 
+            oContent = JSON.parse(s); 
+            //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+            oContent = oContent.output ?? ""; 
+            if (safeEnqueue(oContent)) emitted = true;
+          } catch {
+            //handle error?!? retry?
+            console.log(`🤖  stream::apiExplore::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
+          }
+          return
+        }
+
         if (safeEnqueue(s)) emitted = true;
       };
 

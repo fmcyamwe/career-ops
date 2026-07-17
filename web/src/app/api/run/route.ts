@@ -23,13 +23,13 @@ function buildPrompt(kind: string, input: string, memory: string, today: string)
 End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it helps their search, ≤12 words}
 
 Target: ${input}`;
-  }
+  } //colin the permission issues below to access /tmp smh
   if (kind === "pdf") {
     return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
-1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
+1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-{company-slug}-{date}.md  (company-slug = company lowercased, non-alphanumerics → hyphens; date = a date in the same format as ${today} ).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to /tmp/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
-4. Render the PDF: \`node generate-pdf.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
+3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
+4. Render the PDF: \`node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
 5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
 Do not submit anything anywhere.
 
@@ -47,16 +47,18 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // evaluate (default) — run the REAL oferta mode + persist canonically
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
+1. Read the context file modes/_shared.md which contains the evaluation logic to follow.
 
-2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
+2. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
+
+3. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+4. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
@@ -148,13 +150,13 @@ export async function POST(req: Request) {
       '--question',
       `${input}`,
       "--prompt",
-      prompt, //would it be able to read files? nope gotta add tool calls
-      "--allowedTools",//meh not used
+      prompt,
+      "--allowedTools",
       tools.allowed, 
       "--disallowedTools", 
       tools.disallowed,
       '--fromP',
-      'run',
+      'api-run',
     ]
     : spec.args(prompt);
 
@@ -177,10 +179,13 @@ export async function POST(req: Request) {
   console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
   ///Users/florentcyamweshi/Downloads/career-ops
 
+  //const errFd = fs.openSync(path.join(careerOpsRoot(), 'error.log'), 'a'); //'error.log'
+  const filePath = path.join(careerOpsRoot(), 'api-run.log'); //careerOpsRoot(), 'data', 'pipeline.md'
+  //const a = fs.openSync("err.out", "w");
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
   //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
-  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //path.join(careerOpsRoot(), "seeds")
+  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] }) //path.join(careerOpsRoot(), "seeds")
   : 
   spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -279,6 +284,7 @@ export async function POST(req: Request) {
         console.log(`🤖  stream::apiRun::onData Errr....${s} \n`); //todo** save input_tokens for Ollama here! into 'lastTokens'
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
+        fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'});
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
           sawError = true;
           send({ type: "error", msg: s.trim().slice(0, 200) });

@@ -79,13 +79,41 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+//isClaude:boolean >> cliId: string
+function runPlanner(binPath: string, cliId: string , argsFor: (p: string) => string[], prompt: string): Promise<string> {
+  let isClaude = cliId === "claude";
+  let isOllama = cliId === "ollama";
+
+  const args = isClaude ? 
+  ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] 
+  : isOllama ?
+  ['run', 'agent.py','--question', prompt, '--prompt',prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",'--fromP', 'applyInterpret'] 
+  : argsFor(prompt);
   return new Promise((resolve) => {
     const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let buf = "";
-    child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
-    child.stderr.on("data", () => {});
+    child.stdout.on("data", (d: Buffer) => {
+      if (isOllama){
+        let oContent;
+        try { 
+          //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
+          oContent = JSON.parse(d.toString()); //buf
+          //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
+          oContent = oContent.output ?? "";
+          buf += oContent;//d.toString()
+        } catch {
+          //handle error?!? retry?
+          console.error(`🤖  stream::onData::applyInterpret>>Ollama...ERROR json!! \n ${d.toString()} \n`, buf);
+        }
+        return;
+      }
+      buf += d.toString()
+    });
+
+    child.stderr.on("data", (d: Buffer) => {
+      const s = d.toString();
+      console.log(`🤖  stream::applyInterpret::onData Errr....${s} \n`);
+    });
     const killer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
@@ -94,6 +122,7 @@ function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => 
       }
     }, 150_000);
     child.on("close", () => {
+      console.log(`🤖  runPlanner::onClose....${isOllama} ${binPath} \n\n ${buf} \n\n`, prompt);
       clearTimeout(killer);
       resolve(buf);
     });
@@ -115,7 +144,8 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
   const cands = await captureCandidates(frame).catch(() => [] as Cand[]);
   if (!cands.length) return [];
 
-  const out = await runPlanner(resolved.binPath, cliId === "claude", resolved.spec.args, buildPrompt(title, cands));
+  const isOllama = cliId === "ollama"; // === "claude"
+  const out = await runPlanner(isOllama? 'uv' : resolved.binPath, cliId, resolved.spec.args, buildPrompt(title, cands));
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) return [];
   let parsed: Interpreted[];
@@ -128,6 +158,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
   const byN = new Map(cands.map((c) => [c.n, c]));
   const fields: ApplyField[] = [];
   const tagMap: { candN: number; fid: string; type: string; options: string[] }[] = [];
+  
   parsed
     .filter((p) => p && !p.skip && typeof p.n === "number" && byN.has(p.n))
     .forEach((p) => {
