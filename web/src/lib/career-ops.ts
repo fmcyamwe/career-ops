@@ -203,9 +203,11 @@ export function findReportFile(n: string): string | null {
   try {
     files = fs.readdirSync(path.join(careerOpsRoot(), "reports"));
   } catch {
+    console.log(`🤖  findReportFile:: ${target}...no files!\n`,path.join(careerOpsRoot()));
     return null;
   }
   const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
+  //console.log(`🤖  findReportFile:: ${target} ...match? ${files.length}\n`, match);
   return match ? path.join(careerOpsRoot(), "reports", match) : null;
 }
 

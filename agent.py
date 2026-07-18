@@ -164,7 +164,8 @@ async def with_iter(q):
   #print(nodes)
   #print(agent_run.result.output)
   usage = agent_run.result.usage
-  sys.stderr.write(return_json({'input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}))
+  tokens = {'input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
+  sys.stderr.write(f'{return_json(tokens)}')
   sys.stderr.write('\n[%s] %s :: \n %s ...\n %s' % ("Info:Iter",repr(usage.details),agent_run.result.all_messages(), repr(nodes)))
   return agent_run.result.output
 
