@@ -98,6 +98,7 @@ data/model-blacklist.json
 *.mov
 *.mp4
 
+*.log
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/

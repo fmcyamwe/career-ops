@@ -271,7 +271,7 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        //console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
+        console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
         fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
         if (/error|not found|denied|fatal/i.test(s)) {
@@ -283,9 +283,9 @@ export async function POST(req: Request) {
         safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
         safeClose();
       });
-      child.on("close", () => {
+      child.on("close", (code,signal) => {
         if (!emitted) { //when process.exit(1) invoked without passing anyting to parent
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
+          safeEnqueue("_(no output — is the CLI authenticated?)_ "+code+" ... "+signal);
         }
         safeClose();
       });

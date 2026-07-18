@@ -8,6 +8,7 @@
 #   "datetime",
 #   "dataclasses",
 #   "argparse",
+#   "asyncio",
 # ]
 # ///
 
@@ -22,9 +23,10 @@ from pydantic_ai import Agent, RunContext, capture_run_messages
 from pydantic_ai.capabilities import WebFetch, WebSearch
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
-from pydantic_ai_harness import Shell, FileSystem #toSee
+from pydantic_ai_harness import Shell, FileSystem
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 from seeds.tool_output import Fruit, Vehicle #huh?
+import asyncio
 
 ''' bof
 logging.basicConfig(
@@ -55,14 +57,16 @@ agent = Agent(
   model,
   deps_type=str,
   instructions="",
+  retries={'tools': 3, 'output': 1},
   capabilities=[
     FileSystem(root_dir='.'),
     WebSearch(local='duckduckgo'),
     WebFetch(local=True),
     Shell(cwd='.')
     ])
-#dirr = Path(__file__).parent #ToSee if should use above...
 
+#dirr = Path(__file__).parent #ToSee if should use above...
+#retries={'tools': 3, 'output': 1} to allow tool retry smh
 ##Shell(cwd='.', allowed_commands=['ls', 'node', 'cd']), ##huh with allowed_commands borks with ValueError::'Specify allowed_commands or denied_commands, not both.'
 ####weird...so default denied_commands but cant set allowed_commands too!?! weiiird!
 
@@ -106,7 +110,7 @@ def get_date(q) -> str: #synchronous
   result = agent.run_sync(q, deps='Frank')
   ##sys.stderr.write('\n[%s] %s%s ...%s\r' % ("date", "Frank", '%', result.usage)) 
   sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:date", result.usage, result.all_messages())) 
-  ### RunUsage(input_tokens=49, output_tokens=91, requests=1
+  ### RunUsage(input_tokens=49, output_tokens=91, requests=1)
   return result.output
 
 def ask_question(q, instructions) -> str:
@@ -140,11 +144,35 @@ def tools_question():
   sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
   #print([t.name for t in model.last_model_request_parameters.function_tools])
 
+def with_capture(q):
+  with capture_run_messages() as messages:
+    try:
+      result = agent.run_sync(q, deps='Frank')
+    except Exception as e:
+      print('An error occurred:', repr(e.__cause__))
+      print('\n messages:', messages)
+      #raise PDFRenderError(f"PDF rendering failed: {error_msg}") from e
+    else:
+      sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Capture",result.usage ,messages))
+      print(return_json({'daQ':q, 'output':result.output}))
+    
+async def with_iter(q):
+  nodes = []
+  async with agent.iter(q,deps='Frank',retries=3) as agent_run:
+    async for node in agent_run:
+      nodes.append(node)
+  #print(nodes)
+  #print(agent_run.result.output)
+  usage = agent_run.result.usage
+  sys.stderr.write(return_json({'input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}))
+  sys.stderr.write('\n[%s] %s :: \n %s ...\n %s' % ("Info:Iter",repr(usage.details),agent_run.result.all_messages(), repr(nodes)))
+  return agent_run.result.output
+
 ##to pass in system prompts and other stuff...prolly redundant?
 def create_agent(sys_prompt,parent) -> Agent:
   return Agent(model,deps_type=str,system_prompt=sys_prompt)
 
-def main():
+async def main():
   parser = argparse.ArgumentParser(description='Agent script to access local Ollama LLM')
 
   parser.add_argument('--question',
@@ -184,20 +212,25 @@ def main():
 
   #sys.stderr.flush() #flush first?
   #logging.warning("This goes to both file and console....still? \n")
-  sys.stderr.write('\n\n[%s] %s :>: %s ...Q: %s\r' % ("Ollama", "Starting from", fromScript, question)) 
+  #sys.stderr.write('\n\n[%s] %s :>: %s ...Q: %s\r' % ("Ollama", "Starting from", fromScript, question)) 
   
-  result = ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
-
-  #agenty = create_agent(prompt,fromScript) #toUse? toTest**
-  d = {'daQ':question, 'output':result }
-
-  #tools_question() #yeeeyuh
+  try:
+    result = await with_iter(prompt) #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
+    #agenty = create_agent(prompt,fromScript) #toUse? toTest**
+    d = {'daQ':question, 'output':result }
+    print(f'{return_json(d)}')
+  except Exception as e:
+    #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
+    print('An error occurred::with_iter', repr(e.__cause__))
+    with_capture(prompt)
+    #hopefully above would still run?
     
   #print(f' >> {question} >> {result.output}') #{test}
   #sys.stdout.write('[%s] %s%s ...%s\r' % ("bar", "percents", '%', "status"))
   #sys.stderr.write('[%s] %s%s ...%s\r' % ("bar", "percents", '%', "status")) ##yeee no error prefix!
-  print(f'{return_json(d)}') ##need f to get actual string? >>nope
+  #print(f'{return_json(d)}') ##need f to get actual string? >>nope
   #sys.stdout.flush()  #huh prolly sends everything in stdout AND print() out at same time!
 
 if __name__ == '__main__':
-  main()
+  #main()
+  asyncio.run(main())

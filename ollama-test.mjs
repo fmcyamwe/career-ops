@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test for ollama llm call that gets spawn?
+// test for ollama llm call via spawned process
 // could also do tool tests here!
 
 import { execFileSync } from 'child_process';

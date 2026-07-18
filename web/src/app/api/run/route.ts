@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile } from "@/lib/career-ops"; //readReport
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
@@ -25,11 +25,19 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 Target: ${input}`;
   } //colin the permission issues below to access /tmp smh
   if (kind === "pdf") {
+    const file = findReportFile(input);
+    if (!file) console.error(`🤖  apiRun::buildPrompt >> no report for ${input} :(` ); 
+    //no need to bork when not found prolly?...
+    let repF =  file ? `reports/${path.basename(file)}` : `reports/${input}-{company-slug}-{date}.md  (company-slug = company lowercased, non-alphanumerics → hyphens; date = a date in the same format as ${today} )` 
+    // : path.join(careerOpsRoot(), "reports", input)
+    const match = file ? file.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/) : null
+    const companySlug = match ? match[1] : '{company-slug}';
+
     return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
-1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-{company-slug}-{date}.md  (company-slug = company lowercased, non-alphanumerics → hyphens; date = a date in the same format as ${today} ).
+1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${repF}.
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
-4. Render the PDF: \`node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
+3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-${companySlug}.html (candidate = the profile name in kebab-case).
+4. Render the PDF: \`node generate-pdf.mjs output/cv-{candidate}-${companySlug}.html output/cv-{candidate}-${companySlug}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
 5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
 Do not submit anything anywhere.
 
@@ -47,18 +55,16 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // evaluate (default) — run the REAL oferta mode + persist canonically
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read the context file modes/_shared.md which contains the evaluation logic to follow.
+1. Read modes/_shared.md and modes/oferta.md and follow the evaluation methodology EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
 
-2. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
-
-3. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
+2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-4. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
@@ -224,7 +230,7 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (d: Buffer) => {
-        console.log(`🤖  stream::apiRun::onData....${d.byteLength} \n`,closed,isOllama);
+        console.log(`🤖  stream::apiRun::onData....${d.byteLength} --closed? ${closed} \n`,isOllama);
         if (closed) return;
         if (isOllama){
           let oContent;
@@ -285,15 +291,24 @@ export async function POST(req: Request) {
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'});
+
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
-          sawError = true;
-          send({ type: "error", msg: s.trim().slice(0, 200) });
+          console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`) //test not premature stream closing..the string trimming en plus smh
+          //sawError = true;
+          //send({ type: "error", msg: s.trim().slice(0, 200) });
+        }
+        if (/input_tokens|output_tokens/i.test(s)) {
+          //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
+          let usage;
+          try{ usage = JSON.parse(s) } catch { console.error(`🤖  stream::apiRun::onData Errr...ERROR json!! \n ${s} \n`);};
+          lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+          lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
         }
       });
 
       child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
 
-      child.on("close", (code) => {
+      child.on("close", (code,signal) => {
         const wroteReport = countReports() > reportsBefore;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
@@ -302,6 +317,7 @@ export async function POST(req: Request) {
         console.log(`🤖  stream::apiRun::onClose >> cleanExit? ${cleanExit} 
           <> emittedText: ${emittedText} 
           <> anyError?: ${sawError}
+          <> signal...${signal} --${wroteReport}
           <> tokens: ${lastTokens} <--> ${lastCostUsd} \n\n`); 
 
         if (!emittedText && !sawError && !cleanExit) {
