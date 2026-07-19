@@ -179,15 +179,23 @@ export type PipelineSummary = {
   applications: Application[];
 };
 
+function order(a:InboxJob, b:InboxJob) {
+  const today = new Date().toISOString().slice(0, 10);
+  //console.log(`🤖  Run:::order ORDER ${a.postedAt} >> ${b.postedAt}....\n`);
+  return (a.postedAt ?? today) < (b.postedAt ?? today) ? -1 : ((a.postedAt?? today) > (b.postedAt ?? today) ? 1 : 0); //toTest if not reversed
+}
+
 export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
+  //const today = new Date().toISOString().slice(0, 10);
+  //const latest = { (a, b) => { return a - b }}. //(a?.postedAt ? a.postedAt : today) < (b.postedAt ? b.postedAt : today) 
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
-    inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url) })),
+    inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url) })).sort(order), //no need to use this form? >> (a, b) => order(a,b) 
     applications: readApplications(),
   };
 }

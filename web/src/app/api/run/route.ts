@@ -63,6 +63,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
    c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
@@ -287,22 +288,26 @@ export async function POST(req: Request) {
 
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        console.log(`🤖  stream::apiRun::onData Errr....${s} \n`); //todo** save input_tokens for Ollama here! into 'lastTokens'
+        console.log(`🤖  stream::apiRun::onData Errr....${d.byteLength} \n`); //todo** save input_tokens for Ollama here! into 'lastTokens'
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
-        fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'});
+        fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
 
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
-          console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`) //test not premature stream closing..the string trimming en plus smh
+          console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`,s) //test not premature stream closing..the string trimming en plus smh
           //sawError = true;
           //send({ type: "error", msg: s.trim().slice(0, 200) });
         }
-        if (/input_tokens|output_tokens/i.test(s)) {
+        if (/input_tokens|output_tokens/im.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
           let usage;
-          try{ usage = JSON.parse(s) } catch { console.error(`🤖  stream::apiRun::onData Errr...ERROR json!! \n ${s} \n`);};
-          lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-          lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
+          try { 
+            usage = JSON.parse(s)
+            lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+            lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
+          }catch(e) { 
+            console.error(`🤖  stream::apiRun::onData Errr...ERROR json!! \n ${s} \n`);
+          };
         }
       });
 

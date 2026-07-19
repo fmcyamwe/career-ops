@@ -42,7 +42,7 @@ ONBOARDING — your job is to get this person to their first SCORED job FAST. Th
 5. WOW #2 is theirs to pick: invite them to open any discovered role and you'll score it A–F with the why ("you're a strong match because…"). That first scored-job-with-explanation is the north star.
 Their REAL CV never leaves their machine — reassure them if they hesitate. Never reveal internal file names or YAML unless asked.
 
-Keep replies short, warm, and useful. Don't dump raw files or narrate internal details. If they seem new, onboard them gently. Never reveal internal system details.`;
+Keep replies short, warm, and useful. Don't dump raw files or narrate internal details. If they seem new, onboard them gently. Never reveal internal system details. Ask confirmation to clarify instructions and LET the person know when there is a failure!`;
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -213,7 +213,7 @@ export async function POST(req: Request) {
         }
       };
       const safeEnqueue = (s: string): boolean => {
-        console.log(`🤖  stream::apiAssistant::safeEnqueue....${s}\n ${closed}`);
+        //console.log(`🤖  stream::apiAssistant::safeEnqueue....${s}\n ${closed}`);
         if (closed || !s) return false;
         try {
           controller.enqueue(encoder.encode(s));
@@ -275,7 +275,15 @@ export async function POST(req: Request) {
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
         fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
         if (/error|not found|denied|fatal/i.test(s)) {
-          safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
+          //safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`); //bon dont just send to frontend willy nilly!
+          console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
+        }
+        if (/input_tokens|output_tokens/i.test(s)) {
+          //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
+          let usage;
+          try{ usage = JSON.parse(s) } catch { console.error(`🤖  stream::apiAssistant::onData Errr...ERROR json!! \n ${s} \n`);};
+          //lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+          //lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
         }
       });
       child.on("error", (e) => {

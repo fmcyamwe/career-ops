@@ -154,19 +154,22 @@ def with_capture(q):
       #raise PDFRenderError(f"PDF rendering failed: {error_msg}") from e
     else:
       sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Capture",result.usage ,messages))
-      print(return_json({'daQ':q, 'output':result.output}))
+      print(f'{return_json({'daQ':q, 'output':result.output})}')
     
-async def with_iter(q):
+async def with_iter(q, instructions,useQ):
   nodes = []
-  async with agent.iter(q,deps='Frank',retries=3) as agent_run:
+  async with agent.iter(q if useQ else instructions,instructions=instructions if useQ else None, deps='Frank',retries=3) as agent_run:
     async for node in agent_run:
+      sys.stderr.write(f'{return_json({'Action':repr(node)})}') #still seem to be added at end?
       nodes.append(node)
+      #sys.stderr.write('\n[%s] %s ' % ("Node:Iter",node.data.tool_name))
   #print(nodes)
   #print(agent_run.result.output)
-  usage = agent_run.result.usage
+  usage = agent_run.result.usage ##umm prolly this instead ? >> agent_run.usage
   tokens = {'input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
   sys.stderr.write(f'{return_json(tokens)}')
-  sys.stderr.write('\n[%s] %s :: \n %s ...\n %s' % ("Info:Iter",repr(usage.details),agent_run.result.all_messages(), repr(nodes)))
+  sys.stderr.write('\n[%s] %s :: ...\n %s \n %s == %s' % ("Info:Iter",agent_run.result.all_messages(), repr(nodes), repr(usage), repr(agent_run.usage or "None")))
+  #sys.stderr.flush()
   return agent_run.result.output
 
 ##to pass in system prompts and other stuff...prolly redundant?
@@ -216,13 +219,13 @@ async def main():
   #sys.stderr.write('\n\n[%s] %s :>: %s ...Q: %s\r' % ("Ollama", "Starting from", fromScript, question)) 
   
   try:
-    result = await with_iter(prompt) #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
+    result = await with_iter(question, prompt, True if fromScript == 'api-assistant' else False) #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
     #agenty = create_agent(prompt,fromScript) #toUse? toTest**
     d = {'daQ':question, 'output':result }
     print(f'{return_json(d)}')
   except Exception as e:
     #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
-    print('An error occurred::with_iter', repr(e.__cause__))
+    print('An error occurred::with_iter >>', repr(e.__cause__),repr(e.__class__))
     with_capture(prompt)
     #hopefully above would still run?
     

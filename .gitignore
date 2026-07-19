@@ -111,6 +111,7 @@ package-lock.json
 
 # Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/
+.career-ops-web/
 
 # Planning (local scratchpad)
 plan/
