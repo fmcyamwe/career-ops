@@ -114,6 +114,7 @@ export async function POST(req: Request) {
         emit({ t: "error", m, raw });
         controller.close();
       };
+      
       try {
         fs.appendFileSync(logPath, `\n===== prefill ${new Date(t0).toISOString()} session=${sessionId} cli=${cliId} =====\n`);
       } catch {

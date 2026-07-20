@@ -87,6 +87,8 @@ export async function POST(req: Request) {
       ]
     : spec.args(prompt);
 
+    const filePath = path.join(careerOpsRoot(), `api-ai-explore.log`);
+
   const child = spawn(isOllama? 'uv' : binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
@@ -172,7 +174,12 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        console.log(`🤖  stream::apiExplore::onData Errr....${d.byteLength} \n`);
+        fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
+
         if (/error|not found|denied|fatal/i.test(s)) {
+          console.log(`🤖  stream::apiExplore::onData Errr...SHIET ERROR? \n\n`,s) //test not premature stream closing..the string trimming en plus smh
+          //allow below?
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
       });

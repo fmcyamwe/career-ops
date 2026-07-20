@@ -197,7 +197,7 @@ Reply ONE action JSON.`;
     console.log(`🤖  driveSession::POST....${isOllama}\n\n ${goalText} \n\n`, args);
 
     //bon to see when passing in 'args' constructed here...ToTest* for resumeId
-    const { out, sessionId } = await plannerTurn(spawnCmd, args, resumeId);
+    const { out, sessionId } = await plannerTurn(spawnCmd, isOllama ? base : args, resumeId);
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {

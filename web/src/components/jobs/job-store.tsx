@@ -33,6 +33,7 @@ type Ctx = {
 };
 
 const JobsContext = createContext<Ctx | null>(null);
+
 export function useJobs() {
   const c = useContext(JobsContext);
   if (!c) throw new Error("useJobs must be used within <JobsProvider>");

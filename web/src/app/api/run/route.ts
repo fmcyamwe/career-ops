@@ -24,7 +24,7 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 
 Target: ${input}`;
   } //colin the permission issues below to access /tmp smh
-  if (kind === "pdf") {
+  if (kind === "pdf" || kind === "cover") {
     const file = findReportFile(input);
     if (!file) console.error(`🤖  apiRun::buildPrompt >> no report for ${input} :(` ); 
     //no need to bork when not found prolly?...
@@ -33,13 +33,20 @@ Target: ${input}`;
     const match = file ? file.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/) : null
     const companySlug = match ? match[1] : '{company-slug}';
 
-    return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
+    return kind === "pdf" ? `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
 1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${repF}.
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-${companySlug}.html (candidate = the profile name in kebab-case).
 4. Render the PDF: \`node generate-pdf.mjs output/cv-{candidate}-${companySlug}.html output/cv-{candidate}-${companySlug}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
 5. Update the tracker: in data/applications.md, for the row #${input}, ONLY update the PDF column from ❌ to ✅.
 Do not submit anything anywhere.
+
+End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`
+:
+`You are generating the user's ATS-optimized, TAILORED COVER LETTER PDF for application #${input}, headless, on their machine. Run the REAL career-ops "cover" mode — follow modes/cover.md EXACT STEPS(do not improvise a format).
+1. Read the evaluation report at ${repF}.
+2. Read modes/cover.md and follow all EXACT STEPS within, LOAD any requiered files, EXECUTE any script from the steps and report any failure.
+4. After all the steps in modes/cover.md, confirm that there is a json file in /output/cover-payload-${companySlug}.json
 
 End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
   }
@@ -95,7 +102,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "generate-cover-letter.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -126,7 +133,7 @@ export async function POST(req: Request) {
   // report). 'research' stays read-only. Task (sub-agents) is always blocked
   // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal" || kind === "pdf" || kind === "cover"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
@@ -181,13 +188,13 @@ export async function POST(req: Request) {
   const reportsBefore = persists ? countReports() : 0;
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
-  const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  const writeToken = kind === "evaluate" || kind === "pdf" || kind === "cover" ? acquireTrackerWrite() : null;
 
   console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
   ///Users/florentcyamweshi/Downloads/career-ops
 
   //const errFd = fs.openSync(path.join(careerOpsRoot(), 'error.log'), 'a'); //'error.log'
-  const filePath = path.join(careerOpsRoot(), 'api-run.log'); //careerOpsRoot(), 'data', 'pipeline.md'
+  const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //const a = fs.openSync("err.out", "w");
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
@@ -288,7 +295,7 @@ export async function POST(req: Request) {
 
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        console.log(`🤖  stream::apiRun::onData Errr....${d.byteLength} \n`); //todo** save input_tokens for Ollama here! into 'lastTokens'
+        console.log(`🤖  stream::apiRun::onData Errr....${d.byteLength} \n`);
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});

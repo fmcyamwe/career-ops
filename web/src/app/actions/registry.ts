@@ -250,6 +250,17 @@ const ACTIONS: Record<string, ActionDef> = {
       return { status: "done", jobIds: id ? [id] : [] };
     },
   },
+  generateCover: {
+    sideEffect: "spend",
+    run: (raw, ctx) => {
+      console.log(`🤖  Actions::generateCover >> ${raw}`);
+      const n = String(raw.n ?? "").trim();
+      if (!n) return { status: "ignored", note: "need an application #" };
+      const app = ctx.applications.find((a) => a.n === n);
+      const id = ctx.startJob({ title: `Cover PDF · ${app?.company ?? `#${n}`}`, subtitle: "tailored CV", kind: "cover", input: n, page: `/pipeline/${n}` });
+      return { status: "done", jobIds: id ? [id] : [] };
+    },
+  },
 
   setStatus: {
     sideEffect: "write",

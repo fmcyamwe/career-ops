@@ -45,7 +45,7 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onFocus = () => refetch();
-    window.addEventListener("focus", onFocus);
+    window.addEventListener("focus", onFocus); //sheesh way too much--do some compare to see if any changes!
     return () => window.removeEventListener("focus", onFocus);
   }, [refetch]);
 
