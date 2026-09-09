@@ -99,6 +99,10 @@ data/model-blacklist.json
 *.mp4
 
 *.log
+*.pyc
+
+/scratch/*
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/

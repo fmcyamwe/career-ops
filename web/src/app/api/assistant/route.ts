@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
-import fs from "node:fs";
+//import { spawn } from "node:child_process";
+//import fs from "node:fs";
 import path from "node:path";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import logger from "@/lib/logger.mjs"
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -111,45 +113,7 @@ export async function POST(req: Request) {
         "Bash,Write,Edit,NotebookEdit,Task",
       ]
     : isOllama 
-    ? //[
-      //  "-p",
-      //  prompt,
-        //"--output-format",
-        //"stream-json",
-        //"--verbose",
-        //"--include-partial-messages",
-        //"--permission-mode",
-        //"acceptEdits",
-        //"--allowedTools",
-        //"Read,WebFetch,Glob,Grep",
-        //"--disallowedTools",
-        //"Bash,Write,Edit,NotebookEdit,Task",
-      //]
-      //spec.args(prompt)
-      //['serve']
-      /*[
-        "http://localhost:11434/v1/chat/completions",  //http://localhost:11434/api/chat >>not as complete response and not accessed the same way
-        //"-H",
-        //"Content-Type: application/json",
-        "-d",
-        `{
-          "model": "gemma4",
-          "messages": [{
-            "role": "user",
-            "content": "${message}"
-          }],
-          "think": false,
-          "stream": false,
-          "format": "json"
-        }`//toSee with format json >>meh prolly helps
-      ]*/ //worked...script below better
-      //[
-        //'../../../lib/ollama-test.mjs',//sheesh nah
-      //  'ollama-test.mjs',
-        //"--dry-run", //toReview** not passing in system prompt here
-      //  '--question',
-      //  `${message}`
-      //] //toSee* with below
+    ? 
       [
         'run',
         'agent.py',
@@ -164,11 +128,11 @@ export async function POST(req: Request) {
     : 
     spec.args(prompt);
 
-  console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`, args);//args //,prompt
+  const filePath = path.join(careerOpsRoot(), 'api-assistant.log'); 
+  //console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`, args);
+  logger.info("🤖 api-assistant", {root: careerOpsRoot(), args: args})
 
-  //const errFd = fs.openSync(path.join(careerOpsRoot(), 'error.log'), 'a'); //'error.log'
-  const filePath = path.join(careerOpsRoot(), 'api-assistant.log'); //careerOpsRoot(), 'data', 'pipeline.md'
-  
+
   const child = isOllama 
   ?
   //spawn(`ollama`, args) //`${binPath} serve` //binPath+" "+'serve' 
@@ -180,9 +144,11 @@ export async function POST(req: Request) {
   //huh complains when last 'pipe' was 'ipc'...but not for third 'pipe'..huh?
   // yeeeyuh works and with the 'stdio' options output captured via console.log! 
   // also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
-  spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
+  //spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
+  spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //huh works
   :
-  spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -224,7 +190,8 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
-        console.log(`🤖  stream::apiAssistant::onEmit....\n ${s}`);
+        //console.log(`🤖  stream::apiAssistant::onEmit....\n ${s}`);
+        logger.info("🤖 stream::apiAssistant::emit", {data: s})
         //here should try and proper parsing >> 
         if(isOllama){
           //const args = JSON.parse(s);
@@ -236,7 +203,8 @@ export async function POST(req: Request) {
             if (safeEnqueue(oContent)) emitted = true;
           } catch {
             //handle error?!? retry?
-            console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
+            //console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
+            logger.error("🤖 stream::apiAssistant::emit", {on: 'Ollama...ERROR json!', data: s})
           }
           return
         }
@@ -245,7 +213,8 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (d: Buffer) => {
-        console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);
+        //console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);
+        logger.info("🤖 stream::apiAssistant::onData", {on: 'stdout', size: d.byteLength})
         if (closed) return;
         if (!isClaude) {
           emit(d.toString());
@@ -271,9 +240,12 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
+        //console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
-        fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
+        //fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
+        logger.toFile(filePath, s)
+        logger.info("apiAssistant::onData", {on:'stderr', size: d.byteLength})
+
         if (/error|not found|denied|fatal/i.test(s)) {
           //safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`); //bon dont just send to frontend willy nilly!
           console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)

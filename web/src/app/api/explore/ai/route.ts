@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
+import logger from "@/lib/logger.mjs"
 
 // AI search orchestrates modes/discover.md by running the USER'S configured CLI
 // headless (CLI-agnostic, like the assistant). Web hunting is slow → generous
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
       ]
     : spec.args(prompt);
 
-    const filePath = path.join(careerOpsRoot(), `api-ai-explore.log`);
+  const filePath = path.join(careerOpsRoot(), `api-ai-explore.log`);
 
   const child = spawn(isOllama? 'uv' : binPath, args, { cwd: careerOpsRoot(), env: process.env });
 

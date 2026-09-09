@@ -4,6 +4,8 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import logger from "@/lib/logger.mjs"
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

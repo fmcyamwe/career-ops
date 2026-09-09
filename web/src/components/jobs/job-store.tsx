@@ -44,6 +44,7 @@ const CONFIG_KEY = "career-ops:config";
 const JOBS_KEY = "career-ops:jobs";
 
 function parseVerdict(text: string): JobResult {
+  console.log("umm parseVerdict...", text);
   const m = text.match(/VERDICT:\s*([\d.]+)\s*\/\s*5\s*[—:|-]+\s*(.+)/i);
   if (m) {
     const score = parseFloat(m[1]);
