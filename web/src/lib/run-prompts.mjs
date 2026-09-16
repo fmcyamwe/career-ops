@@ -94,7 +94,7 @@ Target: ${input}`;
           finalPdf: `output/cv-${input}.pdf` };
     //at reports/${input}-*.md 
     return kind === "pdf" ? `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
-1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${daPAths.reportPath}-*.md (for the JD keywords + analysis).
+1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${daPAths.reportPath} (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
@@ -189,7 +189,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // core changes its mind, this follows instead of contradicting it.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
+1. Read modes/_shared.md, read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
 
    Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
 
@@ -202,6 +202,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
@@ -209,5 +210,4 @@ After everything above is written and merged, output EXACTLY one final line, not
 VERDICT: {score}/5 — {reason in 20 words or fewer}
 
 Posting URL: ${input}`;
-//  need this step still? (prolly not?) >>  e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
 }

@@ -23,8 +23,8 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
 
-//oldie..toRemove
-function buildPrompts(kind: string, input: string, memory: string, today: string): string {
+//oldie..toRemove 
+/*function buildPrompta(kind: string, input: string, memory: string, today: string): string {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   if (kind === "research") {
     return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
@@ -42,7 +42,8 @@ Target: ${input}`;
     const match = file ? file.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/) : null
     const companySlug = match ? match[1] : '{company-slug}';
 
-    return kind === "pdf" ? `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
+    return kind === "pdf" ? 
+    `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
 1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${repF}.
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-${companySlug}.html (candidate = the profile name in kebab-case).
@@ -87,7 +88,7 @@ After everything above is written and merged, output EXACTLY one final line, not
 VERDICT: {score}/5 — {reason in 20 words or fewer}
 
 Posting URL: ${input}`;
-}
+}*/
 
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string };
@@ -150,6 +151,7 @@ export async function POST(req: Request) {
       });
     }
     pdfPaths = pathsResult.paths;
+    logger.info(`resolvePdfPaths ${kind} >>`, {...pdfPaths});
   }
 
     // Resolve the posting date HERE rather than asking the agent for it. The
@@ -164,6 +166,7 @@ export async function POST(req: Request) {
       : undefined;
   //umm above postedAt could be useful in resolvePdfPaths() above for old posts!!-toReview
 
+  //const prompt = buildPrompta(kind, input, readMemory(), today);
   const prompt = buildPrompt({kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths } ); //bof lang will default
 
   const isClaude = cliId === "claude";
@@ -217,7 +220,7 @@ export async function POST(req: Request) {
 
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
-  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, prompt: prompt})
+  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: countReports(), postedAt: postedAt, prompt: prompt})
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
@@ -257,14 +260,17 @@ export async function POST(req: Request) {
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
       // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 720_000 : 720_000; //meh //285_000;
+      const killMs = kind === "pdf" ? 720_000 : 720_000; //12 minutes //meh //285_000;
       
       // Set by the killer so the close handler can tell "we timed it out" apart
       // from "the CLI exited on its own" — different failures, different message.
       let killedByTimeout = false;     
       killer = setTimeout(() => {
         killedByTimeout = true;
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
+        try {
+          logger.warn("🤖 api-Run::TIMEOUT!!!", {closed: closed, as: cliId, input: input, buffer: buf, emitted: emittedText})
+          child.kill("SIGTERM"); //bon necessary
+        } catch { /* ignore */ }
       }, killMs);
 
       // Declared before send() so send() can clear it the moment it sees the
@@ -347,7 +353,7 @@ export async function POST(req: Request) {
             //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
             oContent = oContent.output ?? "";
             emittedText = true;
-            sendAgentText(oContent) //toSee
+            sendAgentText(oContent)
             send({ type: "text", text: oContent });
           } catch {
             //handle error?!? retry?
@@ -396,17 +402,18 @@ export async function POST(req: Request) {
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
         //console.log(`🤖  stream::apiRun::onData Errr....${d.byteLength} \n`);
-        logger.info("🤖  stream::apiRun::onData", {on:'stderr', size: d.byteLength})
+        logger.info("🤖  stream::apiRun::stderr", {size: d.byteLength}) //on:'stderr',
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         //fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
         logger.toFile(filePath, `\n ${s} \n`)
         
-        if (/error|denied|fatal|not found|unauthorized|forbidden|auth|login|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) {
+        if (/error|denied|fatal|not found|unauthorized|forbidden|auth|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) { // |login|
           //console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`,s) //test not premature stream closing..the string trimming en plus smh
           //sawError = true;
           //send({ type: "error", msg: s.trim().slice(0, 200) });
-          logger.error("🤖  stream::apiRun::onData", {on:'stderr', size: d.byteLength, message: 'Errr...SHIET ERROR?'})
+          let nodeT = s.slice(0, 50);
+          logger.error("🤖  stream::apiRun::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) //on:'stderr',
         }
         if (/input_tokens|output_tokens/im.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
@@ -515,7 +522,13 @@ export async function POST(req: Request) {
         if (!emittedText && !sawError && !cleanExit) {
           send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
         } else if (!emittedText && !sawError) {
-          send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
+          if(lastTokens && lastCostUsd){
+            //bon just to bypass emittedText...toRedo**
+            logger.warn("🤖 stream::apiRun", {on:"onClose", type: "done..BYPASS", tokens: lastTokens, costUsd: lastCostUsd})
+            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          }else{
+             send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
+          } 
         } else if (persists && !wroteReport) {
           send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
         } else if (!cleanExit || sawError) {

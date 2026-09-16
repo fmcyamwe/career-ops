@@ -15,16 +15,17 @@
 import argparse
 import json
 import sys
-import logging
+#import logging
 from pathlib import Path
 #from bs4 import BeautifulSoup
 from datetime import date
 from pydantic_ai import Agent, RunContext, capture_run_messages
-from pydantic_ai.capabilities import WebFetch, WebSearch
+from pydantic_ai.capabilities import WebFetch, WebSearch, Thinking
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai_harness import Shell, FileSystem
-from pydantic_ai_harness.subagents import SubAgent, SubAgents
+#from pydantic_ai_harness.subagents import SubAgent, SubAgents
+from pydantic_ai_harness.context import RepoContext
 from seeds.tool_output import Fruit, Vehicle #huh?
 import asyncio
 
@@ -42,8 +43,8 @@ logging.basicConfig(
 model = OllamaModel(
     'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'max_tokens': 8192, 'temperature': 0.1, 'timeout': 3_000,'tool_choice':'auto'}
-)
+    settings={'top_k':40, 'temperature': 0.1,'tool_choice': 'auto', 'thinking':'high'}
+)# seed: int && thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`:...removed 'timeout': 3_000, 'max_tokens': 8192, >>tokens?, 
 
 ''' #oldie
 agent = Agent(
@@ -62,7 +63,12 @@ agent = Agent(
     FileSystem(root_dir='.'),
     WebSearch(local='duckduckgo'),
     WebFetch(local=True),
-    Shell(cwd='.')
+    Shell(cwd='.'),
+    #RepoContext(
+    #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
+    #  filenames=('AGENTS.md'), #'CLAUDE.md',
+    #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
+    Thinking(effort='high')
     ])
 
 #dirr = Path(__file__).parent #ToSee if should use above...
@@ -78,7 +84,7 @@ fileReader = Agent(
 )
 '''
 
-agenty =Agent() 
+#agenty =Agent() 
 #could do empty agent and then redeclare it with sys prompts?..@annotations decorators below need instance smh
 ##THo...can forgo them and set in Agent arguments?(for Tools!)
 
@@ -157,6 +163,8 @@ def with_capture(q):
       print(f'{return_json({'daQ':q, 'output':result.output})}')
     
 async def with_iter(q, instructions,useQ):
+  sys.stdout.write(f'{return_json({'useQ':useQ, 'prompt':q, 'instru': instructions})}') 
+  #weirdly print at end?
   nodes = []
   async with agent.iter(q if useQ else instructions,instructions=instructions if useQ else None, deps='Frank',retries=3) as agent_run:
     async for node in agent_run:

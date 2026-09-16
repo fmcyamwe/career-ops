@@ -244,11 +244,13 @@ export async function POST(req: Request) {
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
         //fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
         logger.toFile(filePath, s)
-        logger.info("apiAssistant::onData", {on:'stderr', size: d.byteLength})
+        logger.info("apiAssistant::stderr", {size: d.byteLength}) //on:'stderr', 
 
         if (/error|not found|denied|fatal/i.test(s)) {
           //safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`); //bon dont just send to frontend willy nilly!
-          console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
+          let nodeT = s.slice(0, 30);
+          //console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
+          logger.error("🤖  stream::apiAssistant:::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) 
         }
         if (/input_tokens|output_tokens/i.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
