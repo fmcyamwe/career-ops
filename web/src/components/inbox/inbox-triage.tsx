@@ -145,6 +145,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {
+      console.log("toggleSelect", url);
       const n = new Set(s);
       if (n.has(url)) n.delete(url);
       else n.add(url);

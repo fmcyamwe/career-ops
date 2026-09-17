@@ -172,6 +172,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             const { done, value } = await reader.read();
             if (done) break;
             buf += dec.decode(value, { stream: true });
+            console.log("\nweee api/run", buf)
             let nl: number;
             while ((nl = buf.indexOf("\n")) !== -1) {
               const line = buf.slice(0, nl).trim();

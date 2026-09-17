@@ -188,6 +188,8 @@ export async function POST(req: Request) {
     : isOllama ?
    [
       'run',
+      //'-u', //add flag for unbuffered?--bof for python
+      // '-v' instead for uv? --meh no need with flush flag in print 
       'agent.py',
       '--question',
       `${input}`,
@@ -225,8 +227,8 @@ export async function POST(req: Request) {
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
   //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
-  //spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] })
-  spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  })
+  spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] })
+  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  })
   : 
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
@@ -350,14 +352,16 @@ export async function POST(req: Request) {
           try { 
             //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
             oContent = JSON.parse(d.toString()); //buf
-            //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
-            oContent = oContent.output ?? "";
+            let toSend = oContent.output || oContent.NodeType || ""; //oContent = oContent.output ?? ""
+            let data = oContent.data || "No data" ;
+            
+            sendAgentText(`${toSend} : ${data}`)
+            send({ type: "text", text: `${toSend} : ${data}` });
             emittedText = true;
-            sendAgentText(oContent)
-            send({ type: "text", text: oContent });
           } catch {
-            //handle error?!? retry?
+            //
             console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`);
+            send({ type: "text", text: "Received some json!!"});
           }
           return;
         }
@@ -423,7 +427,7 @@ export async function POST(req: Request) {
             lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
             lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
           }catch(e) { 
-            console.error(`🤖  stream::apiRun::onData Errr...ERROR json!! \n ${s} \n`);
+            logger.error(`🤖 stream::apiRun::onData Errr...ERROR json!!`, {data: `${s} \n`});
           };
         }
       });
@@ -468,7 +472,11 @@ export async function POST(req: Request) {
         }
       };
 
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
+      child.on("error", (e) => { 
+        send({ type: "error", msg: e.message }); 
+        logger.error("🤖 stream::apiRun", {on: 'onError', msg:  e.message, closed: closed, cli: cliId})
+        close(); 
+      });
 
       child.on("close", (code,signal) => {
         const wroteReport = countReports() > reportsBefore;

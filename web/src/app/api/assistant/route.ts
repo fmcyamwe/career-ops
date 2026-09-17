@@ -1,4 +1,4 @@
-//import { spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 //import fs from "node:fs";
 import path from "node:path";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
@@ -115,7 +115,9 @@ export async function POST(req: Request) {
     : isOllama 
     ? 
       [
-        'run',
+        'run', 
+        //'-u', // flag for unbuffered stdout?--bof for python
+        // '-v' instead for uv? --meh no need with flush flag in print 
         'agent.py',
         '--question',
         `${message}`,
@@ -144,18 +146,20 @@ export async function POST(req: Request) {
   //huh complains when last 'pipe' was 'ipc'...but not for third 'pipe'..huh?
   // yeeeyuh works and with the 'stdio' options output captured via console.log! 
   // also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
-  //spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
-  spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //huh works
+  spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
+  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //huh works //toSee with stdout changes to pipe as dont honor stdio params..., 
   :
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
   const encoder = new TextEncoder();
+  //child.stdout.pipe
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
   // the child's late handlers run — otherwise they enqueue onto an already-closed
   // controller and throw an uncaught "Controller is already closed" (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  let output = "";
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -189,22 +193,23 @@ export async function POST(req: Request) {
           return false;
         }
       };
+
       const emit = (s: string) => {
         //console.log(`🤖  stream::apiAssistant::onEmit....\n ${s}`);
-        logger.info("🤖 stream::apiAssistant::emit", {data: s})
-        //here should try and proper parsing >> 
+        //logger.info("🤖 apiAssistant::onEmit", {data: s})
         if(isOllama){
           //const args = JSON.parse(s);
           let oContent;
           try { 
             oContent = JSON.parse(s); 
             //oContent = oContent.choices?.[0]?.message?.content?.trim() ?? "";
-            oContent = oContent.output ?? ""; 
-            if (safeEnqueue(oContent)) emitted = true;
+            let toSend = oContent.output || oContent.NodeType || "";  // oldie used ??
+            let data = oContent.data || "No data" ;
+            if (safeEnqueue(`${toSend} : ${data}`)) emitted = true;
           } catch {
             //handle error?!? retry?
             //console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
-            logger.error("🤖 stream::apiAssistant::emit", {on: 'Ollama...ERROR json!', data: s})
+            logger.error("🤖 stream::apiAssistant::ERROR json", {on: 'OnEmit Ollama.', data: s})
           }
           return
         }
@@ -214,9 +219,10 @@ export async function POST(req: Request) {
 
       child.stdout.on("data", (d: Buffer) => {
         //console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);
-        logger.info("🤖 stream::apiAssistant::onData", {on: 'stdout', size: d.byteLength})
+        logger.info("🤖 stream::apiAssistant", {on: 'stdout:onData', size: d.byteLength})
         if (closed) return;
         if (!isClaude) {
+          //here should try and proper parsing >> toReview**
           emit(d.toString());
           return;
         }
@@ -238,6 +244,7 @@ export async function POST(req: Request) {
           }
         }
       });
+
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
         //console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
@@ -248,7 +255,7 @@ export async function POST(req: Request) {
 
         if (/error|not found|denied|fatal/i.test(s)) {
           //safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`); //bon dont just send to frontend willy nilly!
-          let nodeT = s.slice(0, 30);
+          let nodeT = s.slice(0, 50);
           //console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
           logger.error("🤖  stream::apiAssistant:::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) 
         }
