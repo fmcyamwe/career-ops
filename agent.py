@@ -36,6 +36,14 @@ from pydantic_ai import (
     TextPartDelta,
     ThinkingPartDelta,
     ToolCallPartDelta)
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    ToolCallPart,
+    ToolReturnPart,
+    TextPart, 
+    ThinkingPart
+)
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.capabilities import WebFetch, WebSearch, Capability, Thinking
 from pydantic_ai.models.ollama import OllamaModel
@@ -43,7 +51,7 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai_harness import Shell, FileSystem
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 #from pydantic_ai_harness.context import RepoContext
-from seeds.tool_output import Fruit, Vehicle #huh?
+from seeds.tool_output import Fruit, Vehicle, WriteFileArgs #toSee?
 import asyncio
 
 ''' bof
@@ -77,24 +85,10 @@ model = OllamaModel(
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
     settings={'temperature': 0.1,'top_k': 4, 'tool_choice': 'auto', 'thinking':'high'}
 )# seed: int && thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`:...
-#removed 'timeout': 3_000, 'max_tokens': 8192, >>tokens?, 'top_k':40, >>to consider possible next 40 choices? toTry when == 4
+#removed 'timeout': 3_000, 'max_tokens': 8192, >>tokens?, 'top_k':40, >>to consider possible next 40 choices? seem better when == 4
 
-def write_to_file(indat, filename="output.txt"):
-    with open(filename, "w") as file: #"example.txt"
-        file.write(indat)
 
-def read_from_file(filePath):
-   with open(filePath, 'r', encoding='utf-8') as file:
-    try:
-        contents = file.read()
-        return str(contents) #toSee #f"{contents}"
-    except PermissionError:
-        # Terminal — model should adapt, not retry the same call
-        raise ToolFailed(f"Permission denied writing to {filePath}. Try a different path.")
-    except OSError as e:
-        # Transient — model should retry (e.g. file lock)
-        raise ModelRetry(f"Transient error writing {filePath}: {e}. Retry in a moment.")
-
+''' the below registered on agent via decorators
 # 1. Define the custom toolset
 custom_tools = FunctionToolset()
 
@@ -134,6 +128,7 @@ async def custom_read_file(ctx: RunContext[Any], fpath: str) -> str:
     #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
     return conte #.content
 
+
 refunds = Capability(
     id='refunds',
     description='Use for refund eligibility and refund status.',
@@ -145,34 +140,51 @@ def refund_status(order_id: str) -> str:
     """Look up the refund status for an order."""
     print("refund_status OH")
     return f'Order {order_id}: refund issued on 2026-05-01.'
+'''
 
-sysP = "Do NOT simulate the completion of the evaluation, Do your best to generate the entire markdown report based on all inputs then proceed directly to the file writing steps." # "Read the file tmpad1hni81.txt and write it's content to a new file new.txt"
+sysP = "Do your best to generate the entire markdown report based on all inputs then proceed directly to the file writing steps." # "Read the file tmpad1hni81.txt and write it's content to a new file new.txt"
 #toadd? >> if not possible, you may do best with using placeholders for the generated content structure, as if the evaluation was completed successfully
+#this was bad >> Do NOT simulate the completion of the evaluation, 
 
-
+''' 
 reader = Agent(
   'ollama:gemma4', #need to have set 'OLLAMA_BASE_URL' env. var or borks
   name='reader', #'researcher', 
   description='Reads files and returns their content', #'Researches a topic and reports findings'
-  #capabilities=[CustomFileSystem()] #workd..toSee with below
-  toolsets=[custom_tools]
+  #toolsets=[custom_tools]
   )
 
 writer = Agent(
   'ollama:gemma4',
   name='writer', 
   description='Writes given content to a file',#'Turns notes into polished prose'
-  #capabilities=[CustomFileSystem()] #workd..toSee with below
-  toolsets=[custom_tools]
+  #toolsets=[custom_tools]
   )
+'''
 
+def write_to_file(indat, filename="output.txt"):
+    with open(filename, "w") as file: #"example.txt"
+        file.write(indat)
+
+def read_from_file(filePath):
+   with open(filePath, 'r', encoding='utf-8') as file:
+    try:
+        contents = file.read()
+        return str(contents) #toSee #f"{contents}"
+    except PermissionError:
+        # Terminal — model should adapt, not retry the same call
+        raise ToolFailed(f"Permission denied writing to {filePath}. Try a different path.")
+    except OSError as e:
+        # Transient — model should retry (e.g. file lock)
+        raise ModelRetry(f"Transient error writing {filePath}: {e}. Retry in a moment.")
+    
 agent = Agent(
   model,
   deps_type=str,
-  instructions="Incorporate all information from read files",
+  instructions="Use the custom Read and Write function tools",
   retries={'tools': 3, 'output': 1},
   capabilities=[
-    SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
+    #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
     #FileSystem(root_dir='.'),
     #refunds
     WebSearch(local='duckduckgo'),
@@ -182,7 +194,7 @@ agent = Agent(
     #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
     #  filenames=('AGENTS.md'), #'CLAUDE.md',
     #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
-    Thinking(effort='high')
+    #Thinking(effort='high')
     ])
 
 #dirr = Path(__file__).parent #ToSee if should use above...
@@ -194,6 +206,57 @@ agent = Agent(
 #agenty =Agent() 
 #could do empty agent and then redeclare it with sys prompts?..@annotations decorators below need instance smh
 ##THo...can forgo them and set in Agent arguments?(for Tools!)
+
+
+
+def validate_path(ctx: RunContext[Any], path: str, content: str) -> None:
+    """Validate that a path is provided"""
+    if not path.strip():
+      raise ModelRetry(f'The field path is reqauiered')
+
+@agent.tool # (args_validator=validate_path) >>seem to make it slower?
+async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
+    """
+    Custom write logic: e.g., validate content, use specific storage, 
+    or trigger side effects before writing.
+    """
+    # Example: Custom validation or logic
+    if not args.content.strip():
+      return f"Error: Cannot write empty file to {args.path}"
+
+    real_path = os.path.join(os.getcwd(),args.path)
+    #print(f'\ncustom_write_file:, {args.path},{real_path}',flush=True) #, os.path.dirname(__file__))
+    if 'forbidden' in args.content.lower():
+      raise ValueError("Content contains forbidden words")
+    
+    try:
+      write_to_file(args.content,real_path)
+      return f"Successfully wrote {len(args.content)} characters to {real_path}"
+    except PermissionError:
+      # Terminal — model should adapt, not retry the same call
+      raise ToolFailed(f"Permission denied writing to {real_path}. Try a different path.")
+    except OSError as e:
+      # Transient — model should retry (e.g. file lock)
+      raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
+    #return f"Successfully wrote {len(content)} bytes to {path}"
+
+@agent.tool
+async def read_file(ctx: RunContext[Any], fpath: str) -> str:
+    # Custom validation or logging   #=Path(self.root_dir), 
+    real_path = os.path.join(os.getcwd(),fpath)
+    conte = read_from_file(real_path)
+    #print(f'\ncustom_read_file:\n',conte)
+    #cont = await ctx.emit(CustomReadEvent(path=real_path, content=conte))
+    #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
+    return conte #.content
+
+@agent.tool
+def append_to_file(ctx: RunContext[Any], path: str, content_chunk: str) -> str:
+    """Appen a chunk of text to a specific file path.""" 
+    real_path = os.path.join(os.getcwd(),path)
+    with open(real_path, "a") as file: #"example.txt"
+        file.write(content_chunk)
+    return f"Successfully appended {len(content_chunk)} to {real_path}"
 
 '''
 def get_output():
@@ -267,29 +330,32 @@ def with_capture(q):
       #raise PDFRenderError(f"PDF rendering failed: {error_msg}") from e
     else:
       sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Capture",result.usage ,messages))
-      print(f'{return_json({'daQ':q, 'output':result.output})}')
+      print(f'{return_json({'OfType': 'Result','daQ':q, 'output':result.output})}', flush=True)
     
 async def with_iter(q, instructions,useQ):
-  sys.stdout.write(f'{return_json({'useQ':useQ, 'prompt':q, 'ollama_at':ollama_base_url, 'instru': instructions})}') 
-  #weirdly print at end? 
+  sys.stdout.write(f'{return_json({'OfType': 'Info','useQ':useQ, 'prompt':q, 'ollama_at':ollama_base_url, 'instru': instructions})}')
+  sys.stdout.flush() #toSee..should flush before iter() below
+  #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' smh
   # deps='Frank',
   nodes = []
   output_messages: list[str] = []
-  async with agent.iter(q if useQ else instructions,instructions=instructions if useQ else sysP, retries=3) as agent_run: # to see with sysP instead of None
+  async with agent.iter(q if useQ else instructions,instructions=instructions if useQ else None, retries=3) as agent_run:
     async for node in agent_run:
       #sys.stderr.write(f'{return_json({'Action':repr(node)})}')
       if Agent.is_user_prompt_node(node):
         output_messages.append(f'=== UserPromptNode: {node.user_prompt} ===')
-        print(f'{return_json({'NodeType':'UserPromptNode','data': f'{node.user_prompt}' })}', flush=True) #>>oldie >> sys.stdout.write
+        print(f'{return_json({'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt}' })}', flush=True) #>>oldie >> sys.stdout.write
       elif Agent.is_model_request_node(node):
         output_messages.append('=== ModelRequestNode: streaming partial request tokens ===')
-        print(f'{return_json({'NodeType':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
+        print(f'{return_json({'OfType': 'NodeType','type':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
         async with node.stream(agent_run.ctx) as request_stream:
           final_result_found = False
           async for event in request_stream:
             if isinstance(event, PartStartEvent):
               output_messages.append(f'[Request] Starting part {event.index}: {event.part!r}')
-              print(f'{return_json({'NodeType':'PartStartEvent','data': f'({event.index}: {event.part!r})' })}', flush=True)
+              if isinstance(event.part, ToolCallPart):
+                output_messages.append(f'\n===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}===\n')
+                print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','data': f'{event.part.tool_name}' })}', flush=True)
             elif isinstance(event, PartDeltaEvent):
               if isinstance(event.delta, TextPartDelta):
                   output_messages.append(
@@ -299,15 +365,16 @@ async def with_iter(q, instructions,useQ):
                   output_messages.append(
                       f'[Request] Part {event.index} thinking delta: {event.delta.content_delta!r}'
                   )
-              elif isinstance(event.delta, ToolCallPartDelta):
+              elif isinstance(event.delta, ToolCallPartDelta): #prolly dont get here?
                   output_messages.append(
-                      f'[Request] Part {event.index} args delta: {event.delta.args_delta}'
+                    f'[Request] Part {event.index} args delta!!! ::>>  {event.delta.args_delta}'
                   )
+                  print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPartDelta','data': f'({event.index}: {event.delta.args_delta!r})' })}', flush=True)
             elif isinstance(event, FinalResultEvent):
               output_messages.append(
                 f'[Result] The model started producing a final result (tool_name={event.tool_name})'
               )
-              print(f'{return_json({'NodeType':'FinalResultEvent','data': f'({event.tool_name})' })}', flush=True)
+              print(f'{return_json({'OfType': 'NodeType','type':'FinalResultEvent','data': f'({event.tool_name})' })}', flush=True)
               #sys.stdout.flush()
               final_result_found = True
               break
@@ -318,32 +385,35 @@ async def with_iter(q, instructions,useQ):
               output_messages.append(f'[Output] {output}')
       elif Agent.is_call_tools_node(node):
         output_messages.append('=== CallToolsNode: streaming partial response & tool usage ===')
-        print(f'{return_json({'NodeType':'CallToolsNode','output': "streaming partial response & tool usage"})}', flush=True)
+        print(f'{return_json({'OfType': 'NodeType','type':'CallToolsNode','data': "streaming partial response & tool usage"})}', flush=True)
         async with node.stream(agent_run.ctx) as handle_stream:
           async for event in handle_stream:
             if isinstance(event, FunctionToolCallEvent):
                 output_messages.append(
                     f'[Tools] The LLM calls tool={event.part.tool_name!r} with args={event.part.args} (tool_call_id={event.part.tool_call_id!r})'
                 )
-                print(f'{return_json({'NodeType':'FunctionToolCallEvent','data': f'({event.part.args}: {event.part.tool_call_id!r})' })}', flush=True)
+                print(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','data': f'({event.part.args}: {event.part.tool_call_id!r})' })}', flush=True)
             elif isinstance(event, FunctionToolResultEvent):
                 output_messages.append(
                     f'[Tools] Tool call {event.tool_call_id!r} :: {event.part.tool_name!r}  returned => {event.part.content}'
                 )
-                print(f'{return_json({'NodeType':'FunctionToolResultEvent','data': f'({event.tool_call_id}::{event.part.tool_name!r} => \n {event.part.content!r})' })}', flush=True)
+                print(f'{return_json({'OfType': 'NodeType', 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}', flush=True) #{event.part.content!r}
       elif Agent.is_end_node(node):
         assert agent_run.result is not None
         assert agent_run.result.output == node.data.output
         output_messages.append(f'=== Final Agent Output: {agent_run.result.output} ===')
-        print(f'{return_json({'NodeType':'FinalEndNode','data': f'{node.data.output}' })}', flush=True)
+        print(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','data': f'{node.data.output}' })}', flush=True)
 
-      nodes.append(node)
+      #nodes.append(node)
       sys.stderr.write(f'{return_json({'Action':repr(node)})}')
    
   usage = agent_run.result.usage
-  tokens = {'input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
-  #print(output_messages,sep="\n") # '\nweeee\n', tokens, agent_run.result.output )
-  sys.stderr.write(f'{return_json(tokens)}')
+  tokens = {'OfType': 'Tokens','input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
+  print(f'{return_json(tokens)}', flush=True)
+
+  #print(output_messages,sep="\n", flush=True)
+  
+  #sys.stderr.write(f'{return_json(tokens)}') #better to use stdout...moved up
   #sys.stderr.write('\n[%s] %s :: ...\n %s \n' % ("Info:Iter",agent_run.result.all_messages(), repr(nodes))) #repr(usage), repr(agent_run.usage or "None")
   #sys.stderr.flush()
   return agent_run.result.output
@@ -397,7 +467,7 @@ async def main():
   try:
     result = await with_iter(question, prompt, True if fromScript == 'api-assistant' else False) #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
     #agenty = create_agent(prompt,fromScript) #toUse? toTest**
-    d = {'daQ':question, 'output':result }
+    d = {'OfType': 'Result','daQ':question, 'output':result }
     print(f'{return_json(d)}')
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])

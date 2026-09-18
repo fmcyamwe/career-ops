@@ -139,9 +139,33 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
+
+  async function send_delete(url: string) {
+    try {
+      const res = await fetch("/api/inbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url }),
+      });
+      if (!res.ok || !res.body) {
+        const e = await res.json().catch(() => ({}));
+        //finish("error", e.error || "Failed to start");
+        return e;
+      }
+      return res.statusText
+
+    } catch {
+      console.log("BOOO Error send_delete :(" )
+    }
+  };
+
   const skip = (job: InboxJob) => {
+    console.log("oooh removing", job.url)
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
-    setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    //setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
+    send_delete(job.url).then((r) => {
+      console.log("Yeeeyuh send_delete", r)
+    })
   };
   const toggleSelect = (url: string) =>
     setSelected((s) => {

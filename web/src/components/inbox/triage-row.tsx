@@ -110,7 +110,7 @@ export function TriageRow({
           <button
             type="button"
             onClick={onSkip}
-            title="Skip — hide from the inbox"
+            title="Remove — hide from the inbox"
             className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
             <X className="size-4" />

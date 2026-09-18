@@ -5,7 +5,7 @@
 # ]
 # ///
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class Fruit(BaseModel):
   name: str
@@ -14,3 +14,7 @@ class Fruit(BaseModel):
 class Vehicle(BaseModel):
   name: str
   wheels: int
+
+class WriteFileArgs(BaseModel):
+  path: str = Field(description="The target file path")
+  content: str = Field(description="The file body content")

@@ -222,7 +222,7 @@ export async function POST(req: Request) {
 
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
-  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: countReports(), postedAt: postedAt, prompt: prompt})
+  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: countReports(), postedAt: postedAt}) //, prompt: prompt
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
@@ -336,6 +336,29 @@ export async function POST(req: Request) {
       const sendWarnings = (warnings: string[]) => {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
+
+      const saveTokens = (s:string) =>{
+        if (/input_tokens|output_tokens/im.test(s)) {
+          //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
+          let usage;
+          try { 
+            usage = JSON.parse(s)
+            lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+            lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
+          }catch(e) { 
+            logger.error(`🤖 stream::apiRun::onData Errr...ERROR json!!`, {data: `${s} \n`});
+          };
+        }
+      }
+      const streamAction = (node:any) => {
+        let type = node.type || "";
+        let data = node.data || "No data" ;
+            
+        sendAgentText(`${type} : ${data}`)
+        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
+        send({ type: toSend, label: `${data}`, name: `${data}` });
+        emittedText = true;
+      }
       /** Persist the emitted CV; streams the reason and returns false on failure. */
       const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
         const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
@@ -351,16 +374,28 @@ export async function POST(req: Request) {
           let oContent;
           try { 
             //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
-            oContent = JSON.parse(d.toString()); //buf
-            let toSend = oContent.output || oContent.NodeType || ""; //oContent = oContent.output ?? ""
-            let data = oContent.data || "No data" ;
+            oContent = JSON.parse(d.toString());
+            let OfType = oContent.OfType || undefined
+            switch (OfType) {
+              case undefined: //throw new Error("ERROR YO, no type!!");
+              case 'Result': send({ type: "text", text: `${oContent.output || "Nothing?"}` });//return cmdList();
+              case 'Tokens': return saveTokens(d.toString());
+              case 'Info': logger.info("🤖 Info", {content: oContent}); //toSee**
+              case 'NodeType': return streamAction(oContent);
+              default:
+                //console.error('Usage: node plugins.mjs [list | available | run <id> [hook] | skill <id> | new <name> | add <name|owner/repo> [--sha <c>] [--confirm] | enable <id> [--confirm] | trust <id> | remove <id>]');
+                logger.error("🤖 sstream::onData::Run>>ERROR?", { size: d.byteLength, closed: closed, cli: cliId})
+            }
+            //let toSend = oContent.output || oContent.NodeType || ""; //oContent = oContent.output ?? ""
+            //let data = oContent.data || "No data" ;
             
-            sendAgentText(`${toSend} : ${data}`)
-            send({ type: "text", text: `${toSend} : ${data}` });
+            //sendAgentText(`${toSend} : ${data}`)
+            //send({ type: "text", text: `${toSend} : ${data}` });
             emittedText = true;
           } catch {
             //
             console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`);
+
             send({ type: "text", text: "Received some json!!"});
           }
           return;
@@ -418,17 +453,6 @@ export async function POST(req: Request) {
           //send({ type: "error", msg: s.trim().slice(0, 200) });
           let nodeT = s.slice(0, 50);
           logger.error("🤖  stream::apiRun::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) //on:'stderr',
-        }
-        if (/input_tokens|output_tokens/im.test(s)) {
-          //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
-          let usage;
-          try { 
-            usage = JSON.parse(s)
-            lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-            lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
-          }catch(e) { 
-            logger.error(`🤖 stream::apiRun::onData Errr...ERROR json!!`, {data: `${s} \n`});
-          };
         }
       });
       

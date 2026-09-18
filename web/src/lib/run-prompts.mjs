@@ -189,7 +189,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
   // core changes its mind, this follows instead of contradicting it.
   return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
 
-1. Read modes/_shared.md, read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
+1. Read ${resolvedLang.evalModeFile} and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md.
 
    Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
 
