@@ -58,7 +58,7 @@ export function GenerateCoverButton({ n, company, pdfReady }: { n: string; compa
         className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
         title="Generate an ATS-optimized CV tailored to this role"
       >
-        <FileDown className="size-3.5" /> Generate tailored Cover-Letter (PDF)
+        <FileDown className="size-3.5" /> Generate Cover-Letter (PDF)
       </button>
       <CostBadge kind="spend" size="xs" />
     </span>

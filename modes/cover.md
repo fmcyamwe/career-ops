@@ -265,6 +265,13 @@ End the draft with: "How does this read? Once you approve I'll generate the PDF.
 
 ---
 
+Resolve the cover-letter template with the shared resolver (do not hardcode `cover-letter-template.html`):
+
+- If the user named a template, run: `node cv-templates.mjs resolve cover "<name>"`
+- Otherwise run: `node cv-templates.mjs resolve cover` (returns the `cover_letter.template` default, or the base template when unset).
+
+Fill the resolved template's `{{...}}` placeholders. A non-zero exit means the named template is missing/invalid — surface it, do not silently fall back.
+
 ## Step 9 — Generate PDF
 
 Only after explicit user approval.
@@ -301,11 +308,11 @@ Assemble the JSON payload:
 }
 ```
 
-Write payload to `/tmp/cover-payload-{company-slug}.json`.
+Write payload to `/output/cover-payload-{company-slug}.json`.
 
 Run:
 ```bash
-node generate-cover-letter.mjs --payload /tmp/cover-payload-{company-slug}.json
+node generate-cover-letter.mjs --payload /output/cover-payload-{company-slug}.json
 ```
 
 Report the output path and file size.

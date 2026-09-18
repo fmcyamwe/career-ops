@@ -152,6 +152,9 @@ export async function POST(req: Request) {
     }
     pdfPaths = pathsResult.paths;
     logger.info(`resolvePdfPaths ${kind} >>`, {...pdfPaths});
+    //"html":"/Users/florentcyamweshi/Downloads/career-ops/.career-ops-web/pdf-tmp/cv-web-14.html",
+    // "reportPath":"reports/014-1password-2026-09-18.md",
+    // "finalPdf":"/Users/florentcyamweshi/Downloads/career-ops/output/cv-florent-cyamweshi-1password-2026-09-18.pdf"
   }
 
     // Resolve the posting date HERE rather than asking the agent for it. The
@@ -164,7 +167,6 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  //umm above postedAt could be useful in resolvePdfPaths() above for old posts!!-toReview
 
   //const prompt = buildPrompta(kind, input, readMemory(), today);
   const prompt = buildPrompt({kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths } ); //bof lang will default
@@ -329,7 +331,7 @@ export async function POST(req: Request) {
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
         const visible = cvFilter ? cvFilter.push(text) : text;
-        if (visible) logger.info("🤖 sendAgentText", {content: visible}) //toSee** 
+        if (visible) logger.info("🤖 sendAgentText", {content: visible})
           //...send({ type: "text", text: visible });
       };
       /** Surface non-fatal issues in the run log rather than only a server log. */
@@ -337,7 +339,7 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
 
-      const saveTokens = (s:string) =>{
+      const saveTokens = (s: string) =>{
         if (/input_tokens|output_tokens/im.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
           let usage;
@@ -350,11 +352,12 @@ export async function POST(req: Request) {
           };
         }
       }
-      const streamAction = (node:any) => {
+      const streamNodeAction = (node: any) => {
         let type = node.type || "";
         let data = node.data || "No data" ;
             
         sendAgentText(`${type} : ${data}`)
+        //use if and build object...
         let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
         send({ type: toSend, label: `${data}`, name: `${data}` });
         emittedText = true;
@@ -368,7 +371,7 @@ export async function POST(req: Request) {
       
       child.stdout.on("data", (d: Buffer) => {
         //console.log(`🤖  stream::apiRun::onData....${d.byteLength} --closed? ${closed} \n`,isOllama);
-        logger.info("🤖 stream::apiRun", {on: 'onData', size: d.byteLength, closed: closed, cli: cliId})
+        //logger.info("🤖 stream::apiRun", {on: 'onData', size: d.byteLength, closed: closed, cli: cliId})
         if (closed) return;
         if (isOllama){
           let oContent;
@@ -376,27 +379,26 @@ export async function POST(req: Request) {
             //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
             oContent = JSON.parse(d.toString());
             let OfType = oContent.OfType || undefined
-            switch (OfType) {
-              case undefined: //throw new Error("ERROR YO, no type!!");
-              case 'Result': send({ type: "text", text: `${oContent.output || "Nothing?"}` });//return cmdList();
+            switch (OfType) { //smh falls through without return on a case smh
+              case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: oContent}); //throw new Error("ERROR YO, no type!!");
+              case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
               case 'Tokens': return saveTokens(d.toString());
-              case 'Info': logger.info("🤖 Info", {content: oContent}); //toSee**
-              case 'NodeType': return streamAction(oContent);
+              case 'Info': return logger.info("🤖 Info", {content: oContent});
+              case 'NodeType': return streamNodeAction(oContent);
               default:
-                //console.error('Usage: node plugins.mjs [list | available | run <id> [hook] | skill <id> | new <name> | add <name|owner/repo> [--sha <c>] [--confirm] | enable <id> [--confirm] | trust <id> | remove <id>]');
-                logger.error("🤖 sstream::onData::Run>>ERROR?", { size: d.byteLength, closed: closed, cli: cliId})
+                logger.error("🤖 stream::onData::Run>>ERROR?--No OfType", { size: d.byteLength, closed: closed, cli: cliId, content:d.toString()})
             }
             //let toSend = oContent.output || oContent.NodeType || ""; //oContent = oContent.output ?? ""
             //let data = oContent.data || "No data" ;
             
             //sendAgentText(`${toSend} : ${data}`)
             //send({ type: "text", text: `${toSend} : ${data}` });
-            emittedText = true;
+            //emittedText = true;
           } catch {
             //
             console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`);
 
-            send({ type: "text", text: "Received some json!!"});
+            //send({ type: "text", text: "Received some json!!"});
           }
           return;
         }
