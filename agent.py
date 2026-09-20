@@ -1,6 +1,7 @@
 # /// script
 # dependencies = [
 #   "beautifulsoup4",
+#   "pydantic",
 #   "pydantic_ai",
 #   "pydantic-ai-slim[duckduckgo]",
 #   "pydantic-ai-slim[web-fetch]",
@@ -19,31 +20,37 @@ import os
 #import logging
 from pathlib import Path
 #from bs4 import BeautifulSoup
+import random
 from datetime import date
 from typing import Any
+from pydantic import BaseModel, Field
 from pydantic_ai import (
     Agent, 
-    RunContext, 
+    RunContext,
+    AgentStreamEvent,
     capture_run_messages, 
     ModelRetry, 
-    ToolFailed,
-    FinalResultEvent, 
-    FunctionToolCallEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    RunContext,
-    TextPartDelta,
-    ThinkingPartDelta,
-    ToolCallPartDelta)
+    ToolFailed)
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
     ToolCallPart,
     ToolReturnPart,
-    TextPart, 
-    ThinkingPart
+    RetryPromptPart,
+    OutputToolCallEvent,
+    OutputToolResultEvent,
+    ThinkingPartDelta,
+    TextPartDelta,
+    ToolCallPartDelta,
+    ThinkingPart,
+    FinalResultEvent, 
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    PartDeltaEvent,
+    PartStartEvent,
+    PartEndEvent
 )
+
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.capabilities import WebFetch, WebSearch, Capability, Thinking
 from pydantic_ai.models.ollama import OllamaModel
@@ -51,7 +58,7 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai_harness import Shell, FileSystem
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 #from pydantic_ai_harness.context import RepoContext
-from seeds.tool_output import Fruit, Vehicle, WriteFileArgs #toSee?
+from seeds.tool_output import Fruit, Vehicle, WriteFileArgss #toSee >> umm think borks script importing WriteFileArgs due to missing pydantic lib? --toSee when defined here..
 import asyncio
 
 ''' bof
@@ -79,11 +86,17 @@ agent = Agent(
 ## load_dotenv() >>then do below as normal...toTry**
 ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'localhost_test_test') 
 
+class WriteFileArgs(BaseModel):
+  path: str = Field(description="The target file path")
+  content: str = Field(description="The file body content")
+
+random.seed(None)
+seed = random.randint(1, 100) #umm for model seed? toSee..
 
 model = OllamaModel(
     'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'temperature': 0.1,'top_k': 4, 'tool_choice': 'auto', 'thinking':'high'}
+    settings={'temperature': 0.1,'top_k': 4, 'seed': seed, 'tool_choice': 'auto', 'thinking':'high'}
 )# seed: int && thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`:...
 #removed 'timeout': 3_000, 'max_tokens': 8192, >>tokens?, 'top_k':40, >>to consider possible next 40 choices? seem better when == 4
 
@@ -143,7 +156,6 @@ def refund_status(order_id: str) -> str:
 '''
 
 sysP = "Do your best to generate the entire markdown report based on all inputs then proceed directly to the file writing steps." # "Read the file tmpad1hni81.txt and write it's content to a new file new.txt"
-#toadd? >> if not possible, you may do best with using placeholders for the generated content structure, as if the evaluation was completed successfully
 #this was bad >> Do NOT simulate the completion of the evaluation, 
 
 ''' 
@@ -180,8 +192,8 @@ def read_from_file(filePath):
     
 agent = Agent(
   model,
-  deps_type=str,
-  instructions="Use the custom Read and Write function tools",
+  #deps_type=str,
+  instructions="Use the custom Read, Write, Append tool functions",
   retries={'tools': 3, 'output': 1},
   capabilities=[
     #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
@@ -212,15 +224,14 @@ agent = Agent(
 def validate_path(ctx: RunContext[Any], path: str, content: str) -> None:
     """Validate that a path is provided"""
     if not path.strip():
-      raise ModelRetry(f'The field path is reqauiered')
+      raise ModelRetry(f'The field path is requiered')
 
 @agent.tool # (args_validator=validate_path) >>seem to make it slower?
 async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
-    """
-    Custom write logic: e.g., validate content, use specific storage, 
-    or trigger side effects before writing.
-    """
-    # Example: Custom validation or logic
+    #"""
+    #Custom write logic: e.g., validate content, use specific storage, 
+    #or trigger side effects before writing.
+    #""" # Example: Custom validation or logic
     if not args.content.strip():
       return f"Error: Cannot write empty file to {args.path}"
 
@@ -238,7 +249,6 @@ async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: s
     except OSError as e:
       # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
-    #return f"Successfully wrote {len(content)} bytes to {path}"
 
 @agent.tool
 async def read_file(ctx: RunContext[Any], fpath: str) -> str:
@@ -252,7 +262,7 @@ async def read_file(ctx: RunContext[Any], fpath: str) -> str:
 
 @agent.tool
 def append_to_file(ctx: RunContext[Any], path: str, content_chunk: str) -> str:
-    """Appen a chunk of text to a specific file path.""" 
+    """Append a chunk of text to a specific file path.""" 
     real_path = os.path.join(os.getcwd(),path)
     with open(real_path, "a") as file: #"example.txt"
         file.write(content_chunk)
@@ -331,77 +341,123 @@ def with_capture(q):
     else:
       sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Capture",result.usage ,messages))
       print(f'{return_json({'OfType': 'Result','daQ':q, 'output':result.output})}', flush=True)
-    
+
+nodes = []
+def record_event(event: AgentStreamEvent) -> None:
+  if isinstance(event, PartStartEvent):
+    nodes.append(f'[Request] Starting part {event.index}: {event.part!r} \n')
+    if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
+      nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
+      print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','data': f'{event.part.tool_name}', 'from': f'{event.previous_part_kind}' })}', flush=True)
+
+  elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
+    if isinstance(event.delta, TextPartDelta): 
+      nodes.append(
+        f'[TextPartDelta] Part {event.index} text delta: {event.delta.content_delta!r}'
+      )
+    elif isinstance(event.delta, ToolCallPartDelta):
+      nodes.append(
+        f'[ToolCallPartDelta] Part {event.index} args delta: {event.delta.args_delta!r}'
+      )
+    #elif isinstance(event.delta, ThinkingPartDelta): #too much
+    #  nodes.append(
+    #    f'[ThinkingPartDelta] Part {event.index} thinking delta: {event.delta.content_delta!r}'
+    #  )
+  #elif isinstance(event, ToolReturnPart): #prolly cant happen? nope
+  #  nodes.append(f'[WOAH] ToolReturnPart? {event.tool_name} :: {event.part.part_kind} >> {event.part.args!r}')
+  
+  elif isinstance(event.part, ToolReturnPart): 
+    nodes.append(
+      f'[ToolReturnPart] From {event.part.tool_name} with contents? => {event.part.has_content()}'
+    )
+    print(f'{return_json({'OfType': 'NodeType','type':'ToolReturnPart','data': f'{event.part.tool_name} with  contents? => {event.part.has_content()} ' })}', flush=True)
+
+  elif isinstance(event.part, ThinkingPart): #?!? happens at end of all the multiple ThinkingPartDelta
+    nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
+
+  elif isinstance(event,PartEndEvent): # ModelResponsePart = TextPart | ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart | NativeToolSearchCallPart | NativeToolCallPart | NativeToolSearchReturnPart | NativeToolReturnPart | ThinkingPart | CompactionPart | FilePart | SpeechPart
+    nodes.append(f'[WOAH] PartEndEvent? {event!r}')
+
+  elif isinstance(event,FunctionToolCallEvent):
+    nodes.append(
+      f'[FunctionToolCallEvent] Part {event.part.tool_name} with \n Args => {event.part.args!r}'
+    )
+    print(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}', flush=True)
+
+  elif isinstance(event,FunctionToolResultEvent):#ToolReturnPart | RetryPromptPart
+    nodes.append(
+      f'[FunctionToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
+    )
+    print(f'{return_json({'OfType': 'NodeType', 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}', flush=True) #{event.part.content!r}
+    if isinstance(event.part, ToolReturnPart):
+      nodes.append(
+        f'====[ToolReturnPart] Part >> {event.part!r}'
+      )
+    if isinstance(event.part,RetryPromptPart):
+      nodes.append(
+        f'====[RetryPromptPart] Part >> {event.part!r}'
+      )
+
+  elif isinstance(event,OutputToolCallEvent):
+    nodes.append(
+      f'[OutputToolCallEvent] Part {event.part.tool_name} with args: \n {event.part.args!r}'
+    )
+
+  elif isinstance(event,OutputToolResultEvent):
+    #event.part >>  ToolReturnPart | RetryPromptPart
+    nodes.append(
+      f'[OutputToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
+    )
+      
 async def with_iter(q, instructions,useQ):
-  sys.stdout.write(f'{return_json({'OfType': 'Info','useQ':useQ, 'prompt':q, 'ollama_at':ollama_base_url, 'instru': instructions})}')
-  sys.stdout.flush() #toSee..should flush before iter() below
-  #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' smh
+  sys.stdout.write(f'{return_json({'OfType': 'Info', 'Seed': seed, 'useQ':useQ, 'prompt':q, 'ollama_at':ollama_base_url, 'instru': instructions})}')
+  sys.stdout.flush()
+  #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' or flush as above smh
   # deps='Frank',
-  nodes = []
-  output_messages: list[str] = []
+  output_messages = [] 
+  #nodes: list[str] = [] #was output_messages
   async with agent.iter(q if useQ else instructions,instructions=instructions if useQ else None, retries=3) as agent_run:
     async for node in agent_run:
       #sys.stderr.write(f'{return_json({'Action':repr(node)})}')
       if Agent.is_user_prompt_node(node):
-        output_messages.append(f'=== UserPromptNode: {node.user_prompt} ===')
+        nodes.append(f'=== UserPromptNode: {node.user_prompt} ===')
         print(f'{return_json({'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt}' })}', flush=True) #>>oldie >> sys.stdout.write
       elif Agent.is_model_request_node(node):
-        output_messages.append('=== ModelRequestNode: streaming partial request tokens ===')
+        nodes.append('=== ModelRequestNode: streaming partial request tokens ===') #output_messages
         print(f'{return_json({'OfType': 'NodeType','type':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
+
         async with node.stream(agent_run.ctx) as request_stream:
           final_result_found = False
           async for event in request_stream:
-            if isinstance(event, PartStartEvent):
-              output_messages.append(f'[Request] Starting part {event.index}: {event.part!r}')
-              if isinstance(event.part, ToolCallPart):
-                output_messages.append(f'\n===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}===\n')
-                print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','data': f'{event.part.tool_name}' })}', flush=True)
-            elif isinstance(event, PartDeltaEvent):
-              if isinstance(event.delta, TextPartDelta):
-                  output_messages.append(
-                      f'[Request] Part {event.index} text delta: {event.delta.content_delta!r}'
-                  )
-              elif isinstance(event.delta, ThinkingPartDelta):
-                  output_messages.append(
-                      f'[Request] Part {event.index} thinking delta: {event.delta.content_delta!r}'
-                  )
-              elif isinstance(event.delta, ToolCallPartDelta): #prolly dont get here?
-                  output_messages.append(
-                    f'[Request] Part {event.index} args delta!!! ::>>  {event.delta.args_delta}'
-                  )
-                  print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPartDelta','data': f'({event.index}: {event.delta.args_delta!r})' })}', flush=True)
-            elif isinstance(event, FinalResultEvent):
-              output_messages.append(
+            if isinstance(event, FinalResultEvent):
+              nodes.append(
                 f'[Result] The model started producing a final result (tool_name={event.tool_name})'
               )
               print(f'{return_json({'OfType': 'NodeType','type':'FinalResultEvent','data': f'({event.tool_name})' })}', flush=True)
-              #sys.stdout.flush()
               final_result_found = True
               break
+
+            #continue with streaming
+            record_event(event)
+
           if final_result_found:
             # Once the final result is found, we can call `AgentStream.stream_text()` to stream the text.
             # A similar `AgentStream.stream_output()` method is available to stream structured output.
-            async for output in request_stream.stream_text():
-              output_messages.append(f'[Output] {output}')
+            async for output in request_stream.stream_text(): 
+              #nodes.append(f'[Output] >> ModelRequestNode >> {output}') ##too noisy
+              ##could check whole request_stream that not failed...todo**
+              continue
       elif Agent.is_call_tools_node(node):
-        output_messages.append('=== CallToolsNode: streaming partial response & tool usage ===')
+        nodes.append(f'\n === CallToolsNode: streaming partial response & tool usage ===')
         print(f'{return_json({'OfType': 'NodeType','type':'CallToolsNode','data': "streaming partial response & tool usage"})}', flush=True)
         async with node.stream(agent_run.ctx) as handle_stream:
           async for event in handle_stream:
-            if isinstance(event, FunctionToolCallEvent):
-                output_messages.append(
-                    f'[Tools] The LLM calls tool={event.part.tool_name!r} with args={event.part.args} (tool_call_id={event.part.tool_call_id!r})'
-                )
-                print(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','data': f'({event.part.args}: {event.part.tool_call_id!r})' })}', flush=True)
-            elif isinstance(event, FunctionToolResultEvent):
-                output_messages.append(
-                    f'[Tools] Tool call {event.tool_call_id!r} :: {event.part.tool_name!r}  returned => {event.part.content}'
-                )
-                print(f'{return_json({'OfType': 'NodeType', 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}', flush=True) #{event.part.content!r}
+            record_event(event)
+
       elif Agent.is_end_node(node):
         assert agent_run.result is not None
         assert agent_run.result.output == node.data.output
-        output_messages.append(f'=== Final Agent Output: {agent_run.result.output} ===')
+        nodes.append(f'=== Final Agent Output: {agent_run.result.output} ===') #output_messages
         print(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','data': f'{node.data.output}' })}', flush=True)
 
       #nodes.append(node)
@@ -412,6 +468,8 @@ async def with_iter(q, instructions,useQ):
   print(f'{return_json(tokens)}', flush=True)
 
   #print(output_messages,sep="\n", flush=True)
+  #sys.stderr.write(f'{return_json(tokens)}')
+  #sys.stderr.write({return_json('\n'.join(str(p) for p in output_messages))}) #seems to make script bork? or was somthing else?
   
   #sys.stderr.write(f'{return_json(tokens)}') #better to use stdout...moved up
   #sys.stderr.write('\n[%s] %s :: ...\n %s \n' % ("Info:Iter",agent_run.result.all_messages(), repr(nodes))) #repr(usage), repr(agent_run.usage or "None")
@@ -468,14 +526,15 @@ async def main():
     result = await with_iter(question, prompt, True if fromScript == 'api-assistant' else False) #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
     #agenty = create_agent(prompt,fromScript) #toUse? toTest**
     d = {'OfType': 'Result','daQ':question, 'output':result }
-    print(f'{return_json(d)}')
+    print(f'{return_json(d)}', flush=True)
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])
+    sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork?
 
   except Exception as e:
     #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
     print('An error occurred::with_iter >>' ,repr(e.__cause__),repr(e.__class__))
-    with_capture(prompt)
+    #with_capture(prompt)
     #hopefully above would still run?
     
   #print(f' >> {question} >> {result.output}') #{test}

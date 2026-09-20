@@ -9,6 +9,8 @@ import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.m
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+//import { fencingReport } from "@/lib/cli-fencing.mjs"; //meh?
 
 import logger from "@/lib/logger.mjs";
 
@@ -103,6 +105,7 @@ export async function POST(req: Request) {
   }
   const resolved = resolveCli(cliId);
   if (!resolved) {
+    logger.error(`WOAH WOAH ERROR No CLI found for ${cliId} !!`, {input: input, in: careerOpsRoot()}); //toMonitor changes
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
@@ -140,11 +143,10 @@ export async function POST(req: Request) {
   // from this run's freshly parsed envelope before any render, and the agent is
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
-  if (kind === "pdf") { //or cover?
+  if (kind === "pdf") { //todo** add "cover" prolly
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
     if (!pathsResult.ok) {
-      logger.error(`No resolvePdfPaths for ${kind} !!`, {input: input, in: careerOpsRoot()});
-      //return?!? or continue?
+      logger.error(`ERROR No resolvePdfPaths for ${kind} !!`, {input: input, in: careerOpsRoot()});
       return new Response(JSON.stringify({ error: pathsResult.error }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -211,31 +213,44 @@ export async function POST(req: Request) {
   const reportsDir = path.join(careerOpsRoot(), "reports");
   const countReports = () => {
     try {
-      return fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md")).length;
+      return fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md"));//.length; 
     } catch {
-      return 0;
+      return [];
     }
   };
+
   const persists = kind === "evaluate";
-  const reportsBefore = persists ? countReports() : 0;
+  const reportsBefore = persists ? countReports() : [];
+
   // Tracker-mutating runs hold a write token so a row delete can't race their merge
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" || kind === "cover" ? acquireTrackerWrite() : null;
 
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
-  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: countReports(), postedAt: postedAt}) //, prompt: prompt
+  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}) 
+
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
   //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
   spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] })
-  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  })
+  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //should use this? as >> stdin must reach EOF or the CLI waits on piped input that never comes...
   : 
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
-  const enc = new TextEncoder();
+  // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
+  // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
+  // yields a replacement character and mis-decodes the bytes after it. Those bytes
+  // are the CV now (#2185) — the agent's HTML flows through cvFilter to
+  // writeCvHtml and on to the renderer — and no structural check would catch it,
+  // because the envelope markers and </html> are ASCII and still match. Setting
+  // the encoding makes Node hold partial sequences across chunks.
+  child.stdout.setEncoding("utf8"); //has any effect? >>dont seem like? even when should expect string instead of Buffer...
+  child.stderr.setEncoding("utf8");//idem above
+
+  const encoder = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
   // flip `closed` before the child's late handlers run, and send() is try/catch'd —
@@ -250,12 +265,14 @@ export async function POST(req: Request) {
   // guard while mark-pdf-ready.mjs is still actively writing applications.md.
   let pdfRenderPromise: Promise<void> | null = null;
   let writeTokenReleased = false;
+
   const releaseWriteTokenOnce = () => {
     if (writeToken !== null && !writeTokenReleased) {
       writeTokenReleased = true;
       releaseTrackerWrite(writeToken);
     }
   };
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -263,8 +280,9 @@ export async function POST(req: Request) {
       let sawError = false;
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
+
       // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 720_000 : 720_000; //12 minutes //meh //285_000;
+      const killMs = kind === "pdf" ? 840_000 : 720_000; //14 && 12 minutes //meh //285_000;
       
       // Set by the killer so the close handler can tell "we timed it out" apart
       // from "the CLI exited on its own" — different failures, different message.
@@ -280,10 +298,11 @@ export async function POST(req: Request) {
       // Declared before send() so send() can clear it the moment it sees the
       // client disconnect; assigned just below, once close() exists.
       let heartbeat: ReturnType<typeof setInterval> | undefined;
+      
       const send = (obj: unknown) => {
         if (closed) return;
         try { 
-          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); 
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n")); //umm that newline? \n
         } catch { 
           // The client is gone. Stop the heartbeat here rather than waiting for
           // close(): the child can still run for minutes (maxDuration 800s), and
@@ -303,14 +322,14 @@ export async function POST(req: Request) {
       // It must be a timer, not a hook on incoming text: piggy-backing on agent
       // output cannot fire during exactly the silences it needs to cover.
       // Unknown event types are ignored by the client's switch, so old tabs are safe.
-      heartbeat = setInterval(() => send({ type: "keepalive" }), 720_000);//10_000
+      heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
-        logger.warn("🤖 stream::apiRun", {on: 'close', isClosed: closed, kind: kind, cli: cliId})
+        //logger.warn("🤖 apiRun::Close", {isClosed: closed, kind: kind, cli: cliId, hasWriteToken: writeToken !== null, tokenReleased: !writeTokenReleased})
         if (!closed) {
           closed = true;
-          if (heartbeat) clearInterval(heartbeat);
+          if (heartbeat) clearInterval(heartbeat); //think this makes nav after a while go to pipeline instead of report from the dialog?
           if (killer) clearTimeout(killer);
-          releaseWriteTokenOnce();//if (writeToken !== null) releaseTrackerWrite(writeToken);
+          releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -331,12 +350,44 @@ export async function POST(req: Request) {
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
         const visible = cvFilter ? cvFilter.push(text) : text;
-        if (visible) logger.info("🤖 sendAgentText", {content: visible})
-          //...send({ type: "text", text: visible });
+        if (visible) logger.info("🤖 sendAgentText", {kind: kind, content: visible})
+        //send({ type: "text", text: visible }); //toReview** if shouldnt? add check: kind === "pdf"
       };
+
       /** Surface non-fatal issues in the run log rather than only a server log. */
       const sendWarnings = (warnings: string[]) => {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
+      };
+
+      /** Persist the emitted CV; streams the reason and returns false on failure. */
+      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
+        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
+        //if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) }); //should be this and send error to frontend..todo**
+        !written.ok ?  logger.info("🤖 saveCv --Boo Error", {kind: kind, error: written.error.slice(0, 200), paths: paths, envelope: envelope}) : logger.info("🤖 saveCv --YEEEYUH", {kind: kind, paths: paths, envelope: envelope}); 
+        return written.ok;
+      };
+
+      const processParsedLine = (line: string) => { //prolly should use this instead of 'streamNodeAction' when have parseOllamaEvent for parseEvent
+        if (!spec.parseEvent) return;
+        const ev = spec.parseEvent(line);
+        if (ev?.text) {
+          emittedText = true;
+          // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a
+          // <<cv-html>> envelope, so parsed text has to reach cvFilter too or the
+          // backend has nothing to save and the 25 KB body floods the run log (#2185).
+          sendAgentText(ev.text);
+        }
+        if (ev?.tool) send({ type: "tool", name: ev.tool });
+        if (ev?.status) send({ type: "status", label: ev.status });
+        // Accumulated, not assigned: usage events are per-turn, so overwriting made a
+        // multi-turn run report only its last turn. The authoritative "done" is sent
+        // on close, so the honesty gate decides done-vs-error first.
+        lastTokens = accumulateTokens(lastTokens, ev);
+        if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
+        if (ev?.error) {
+          sawError = true;
+          send({ type: "error", msg: ev.error.slice(0, 200) });
+        }
       };
 
       const saveTokens = (s: string) =>{
@@ -348,60 +399,60 @@ export async function POST(req: Request) {
             lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
             lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
           }catch(e) { 
-            logger.error(`🤖 stream::apiRun::onData Errr...ERROR json!!`, {data: `${s} \n`});
+            logger.error(`🤖 saveTokens >> ERROR json!!`, {data: `${s} \n`});
           };
         }
       }
-      const streamNodeAction = (node: any) => {
+
+      const streamNodeAction = (node: any) => { //todo** move this into run-cli-support.mjs
         let type = node.type || "";
         let data = node.data || "No data" ;
-            
+            //skip for 'UserPromptNode'  && 'ModelRequestNode' && 'CallToolsNode' ? 
+            //FunctionToolResultEvent as status? >> use ToolReturnPart instead? ..prolly both
+        if (type == 'UserPromptNode'){
+          logger.info("🤖 UserPromptNode", node);
+          return
+        }
+        
         sendAgentText(`${type} : ${data}`)
         //use if and build object...
-        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
-        send({ type: toSend, label: `${data}`, name: `${data}` });
+        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' || type == 'UserPromptNode' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
+        send({ type: toSend, label: `${toSend}`, name: `${data}` });
         emittedText = true;
       }
-      /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
-        if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
-        return written.ok;
-      };
       
-      child.stdout.on("data", (d: Buffer) => {
-        //console.log(`🤖  stream::apiRun::onData....${d.byteLength} --closed? ${closed} \n`,isOllama);
-        //logger.info("🤖 stream::apiRun", {on: 'onData', size: d.byteLength, closed: closed, cli: cliId})
+      const processOllamaEvt = (line: string) => {
+        //if (!spec.parseEvent) return;
+        //const ev = spec.parseEvent(line);
+        ////status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
+
+        let oContent;
+        try {
+          oContent = JSON.parse(line);
+          let OfType = oContent.OfType || undefined
+          switch (OfType) { //smh falls through without return on a case smh
+            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: oContent}); //throw new Error("ERROR YO, no type!!");
+            case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
+            case 'Tokens': return saveTokens(line);
+            case 'Info': return logger.toFile(filePath, `\n ${oContent} \n`); //bon save this to file
+            case 'NodeType': return streamNodeAction(oContent);
+            default:
+              logger.error("🤖 processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})
+          }
+
+        } catch {
+          console.error(`🤖   processOllamaEvt >>Ollama...ERROR json!! \n ${line} \n`);
+
+          //send({ type: "text", text: "Received some json!!"});
+        }
+      }
+      
+      child.stdout.on("data", (d: Buffer) => { //chunk: string
         if (closed) return;
         if (isOllama){
-          let oContent;
-          try { 
-            //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
-            oContent = JSON.parse(d.toString());
-            let OfType = oContent.OfType || undefined
-            switch (OfType) { //smh falls through without return on a case smh
-              case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: oContent}); //throw new Error("ERROR YO, no type!!");
-              case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
-              case 'Tokens': return saveTokens(d.toString());
-              case 'Info': return logger.info("🤖 Info", {content: oContent});
-              case 'NodeType': return streamNodeAction(oContent);
-              default:
-                logger.error("🤖 stream::onData::Run>>ERROR?--No OfType", { size: d.byteLength, closed: closed, cli: cliId, content:d.toString()})
-            }
-            //let toSend = oContent.output || oContent.NodeType || ""; //oContent = oContent.output ?? ""
-            //let data = oContent.data || "No data" ;
-            
-            //sendAgentText(`${toSend} : ${data}`)
-            //send({ type: "text", text: `${toSend} : ${data}` });
-            //emittedText = true;
-          } catch {
-            //
-            console.error(`🤖  stream::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`);
-
-            //send({ type: "text", text: "Received some json!!"});
-          }
-          return;
+          return processOllamaEvt(d.toString()); //try with toString('utf8') ?
         }
+
         if (!isClaude) {
           emittedText = true;
           send({ type: "text", text: d.toString() });
@@ -414,6 +465,8 @@ export async function POST(req: Request) {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
           if (!line) continue;
+          //whole try below would be replaced by below
+          ////if (line) processParsedLine(line);
           try {
             const ev = JSON.parse(line);
             if (ev.type === "stream_event") {
@@ -440,10 +493,9 @@ export async function POST(req: Request) {
         }
       });
 
-      child.stderr.on("data", (d: Buffer) => {
+      child.stderr.on("data", (d: Buffer) => { //chunk: string
         const s = d.toString();
-        //console.log(`🤖  stream::apiRun::onData Errr....${d.byteLength} \n`);
-        logger.info("🤖  stream::apiRun::stderr", {size: d.byteLength}) //on:'stderr',
+        logger.info("🤖  stream::apiRun::stderr", { size: d.byteLength})
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         //fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
@@ -475,6 +527,7 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
+          logger.info("🔗 rendering PDF", {kind: kind, report: input, paths: paths, format: format})
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
@@ -500,20 +553,20 @@ export async function POST(req: Request) {
 
       child.on("error", (e) => { 
         send({ type: "error", msg: e.message }); 
-        logger.error("🤖 stream::apiRun", {on: 'onError', msg:  e.message, closed: closed, cli: cliId})
+        logger.error("💣 ERROR", {kind: kind, msg: e.message, closed: closed, cli: cliId})
         close(); 
       });
 
-      child.on("close", (code,signal) => {
-        const wroteReport = countReports() > reportsBefore;
+      child.on("close", (code) => {
+        const wroteReport =  hasNewCompletedReport(reportsBefore, countReports()); //countReports() > reportsBefore;
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
         console.log(`🤖  stream::apiRun::onClose >> cleanExit? ${cleanExit} 
           <> emittedText: ${emittedText} 
-          <> anyError?: ${sawError}
-          <> signal...${signal} --${wroteReport} --${closed}
+          <> anyError?: ${sawError} <--> closed? ${closed}
+          <> reportMade?:${wroteReport} -- from: ${reportsBefore.length} >>to ${countReports().length}
           <> tokens: ${lastTokens} <--> ${lastCostUsd} \n\n`); 
 
         // A client disconnect can fire cancel() (which kills `child`) before
@@ -540,17 +593,39 @@ export async function POST(req: Request) {
         
         if(kind === "pdf"){
           const tail = cvFilter?.flush();
-          if (tail) logger.info("🤖 tailzzz", {content: tail, pdfs:pdfPaths})//send({ type: "text", text: tail });
+          if (tail) {logger.info("🤖 tailzzz", {content: tail, pdfs:pdfPaths}) ;send({ type: "text", text: tail }); }
+
           const envelope = cvFilter?.result();
-          if (envelope) logger.info("🤖 cvEnvelope", {content: envelope,  pdfs:pdfPaths})
-          // The worker ran but never wrote the report/tracker row (e.g. a CLI
-          // without file-write authorization) — surface it instead of a fake score.
-          //if (saveCv(pdfPaths ?? {html:'',reportPath:'',finalPdf:""}, envelope)) {
-            // Tracked so cancel() can defer releasing writeToken until this
-            // settles; close() happens once rendering finishes, not here.
-          //  pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
-          //  return;
-          //}
+          if (envelope) logger.info("🤖 cvEnvelope PRESENT!", {content: envelope,  pdfs:pdfPaths});
+          const outcome = pdfRunOutcome({
+            envelope,
+            noOutputMessage: null, //toReview** //noOutputError(),
+            sawError,
+            cleanExit,
+            hasPaths: pdfPaths !== undefined,
+          });
+          
+          if (!outcome.ok) {
+            logger.error("🤖 PDF run BAAAD outcome!", {content: outcome, envelope: envelope, pdfs:pdfPaths});
+            //send({ type: "error", msg: outcome.message }); //send?
+          } else if (!pdfPaths || envelope?.ok !== true) {
+            // Unreachable: pdfRunOutcome validated both via hasPaths/envelope.ok.
+            // Kept for narrowing, but it must REPORT rather than fall through to a
+            // bare close() — a stream that ends with neither error nor done is the
+            // one outcome this handler exists to prevent.
+            logger.error("🤖 No PDF paths?!?", {content: outcome, envelope: envelope, pdfs:pdfPaths});
+            send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — No paths or envelope!!" });
+          } else {
+            sendWarnings(envelope.warnings);
+            if (saveCv(pdfPaths, envelope)) {
+              logger.info("🤖 WOOH saved CV..now rendering PDF", {envelope: envelope, pdfs:pdfPaths});
+              // Tracked so cancel() can defer releasing writeToken until this
+              // settles; close() happens once rendering finishes, not here.
+              pdfRenderPromise = renderPdf(pdfPaths, envelope.format); 
+              return;
+            }
+          }
+          return close();
         }
   
         if (!emittedText && !sawError && !cleanExit) {
@@ -563,7 +638,8 @@ export async function POST(req: Request) {
           }else{
              send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
           } 
-        } else if (persists && !wroteReport) {
+        } else if (persists && !wroteReport) { //toReview..prolly needed for close?
+          logger.warn("🤖 stream::apiRun", {on:"onClose", content: "evaluation didn't save a report..error?", kind:kind, tokens: lastTokens, costUsd: lastCostUsd})
           send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
         } else if (!cleanExit || sawError) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
@@ -580,7 +656,15 @@ export async function POST(req: Request) {
       closed = true;
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      releaseWriteTokenOnce();//if (writeToken !== null) releaseTrackerWrite(writeToken);
+      //releaseWriteTokenOnce();
+      if (pdfRenderPromise) {
+        // Render/mark keeps running after this client disconnects — wait for
+        // it to settle before releasing the guard, so a concurrent tracker
+        // delete can't race mark-pdf-ready.mjs's still-in-flight write.
+        pdfRenderPromise.finally(releaseWriteTokenOnce);
+      } else {
+        releaseWriteTokenOnce();
+      }
     },
   });
 

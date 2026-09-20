@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent, parseGrokEvent, parseOllamaEvent } from "./run-cli-support.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -12,17 +13,34 @@ export type CliSpec = {
   url: string;
   /** headless invocation args for a single prompt */
   args: (prompt: string) => string[];
+  /** Structured-output CLIs only: args for a run whose stdout the caller parses
+   * with `parseEvent` — i.e. /api/run's dashboard stream, the one consumer that
+   * understands events. Absent → that caller falls back to `args`.
+   *
+   * INVARIANT: `parseEvent` only applies to output produced by THIS argv (for
+   * claude, by claude-invocation.mjs's `claudeCliArgs`, which spells its own
+   * `--output-format stream-json`). Pairing one CLI's parser with a plain-text
+   * invocation yields a silent stream of unparseable lines. */
+  streamArgs?: (prompt: string) => string[];
+  /** Structured-output CLIs only: parse one stdout line into dashboard events.
+   * Absent → the route streams stdout as raw text (the default for every CLI
+   * without its own structured output format). */
+  parseEvent?: (line: string) => import("./run-cli-support.mjs").ParsedEvent | null;
+  /** Structured-output CLIs only: decide whether a stderr line is fatal.
+   * Absent → the route falls back to the shared generic error regex. */
+  stderrIsFatal?: (line: string) => boolean;
 };
 
 export const KNOWN: CliSpec[] = [
-  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
-  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p] },
+  { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
+  { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr  },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
   { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
   { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p] },
   { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
-  { id: "ollama", name: "Ollama CLI", bin: "ollama", run: "ollama serve", url: "https://ollama.com", args: (p) => ["-p", p] }, //serve OLLAMA_CONTEXT_LENGTH ?  url is for install...  
+  { id: "ollama", name: "Ollama CLI", bin: "ollama", run: "ollama serve", url: "https://ollama.com", args: (p) => ["-p", p], parseEvent: parseOllamaEvent }, //serve OLLAMA_CONTEXT_LENGTH ?  >>bof dont use 'run' property 
+  { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], streamArgs: (p) => ["-p", p, "--output-format", "streaming-json"], parseEvent: parseGrokEvent },
 ];
 
 function searchDirs(): string[] {
@@ -80,7 +98,7 @@ export function findBin(bin: string, dirs = searchDirs()): string | null {
       } catch {
         /* not here */
         //console.log(`🤖  findBin...Error access....\n`,bin, p);
-        //bon permission issue for ollama..also pointing in wrong place? as should pointt to /opt/homebrew/bin/ollama 
+        //bon permission issue for ollama..also pointing in wrong place? as should point to /opt/homebrew/bin/ollama 
         //cause env PATH matches with /usr/local/bin/ollama first smh
       }
     }
