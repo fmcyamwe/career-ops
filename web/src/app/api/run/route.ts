@@ -7,6 +7,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { buildSysPrompt, apiRunSesshInstructions } from "@/lib/ollama-prompts.mjs"; //Olama system prompts
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
@@ -25,72 +26,6 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
 
-//oldie..toRemove 
-/*function buildPrompta(kind: string, input: string, memory: string, today: string): string {
-  const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
-  if (kind === "research") {
-    return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging.${mem}
-
-End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it helps their search, ≤12 words}
-
-Target: ${input}`;
-  } //colin the permission issues below to access /tmp smh
-  if (kind === "pdf" || kind === "cover") {
-    const file = findReportFile(input);
-    if (!file) console.error(`🤖  apiRun::buildPrompt >> no report for ${input} :(` ); 
-    //no need to bork when not found prolly?...
-    let repF =  file ? `reports/${path.basename(file)}` : `reports/${input}-{company-slug}-{date}.md  (company-slug = company lowercased, non-alphanumerics → hyphens; date = a date in the same format as ${today} )` 
-    // : path.join(careerOpsRoot(), "reports", input)
-    const match = file ? file.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/) : null
-    const companySlug = match ? match[1] : '{company-slug}';
-
-    return kind === "pdf" ? 
-    `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
-1. For the JD keywords + analysis, Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${repF}.
-2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to output/cv-{candidate}-${companySlug}.html (candidate = the profile name in kebab-case).
-4. Render the PDF: \`node generate-pdf.mjs output/cv-{candidate}-${companySlug}.html output/cv-{candidate}-${companySlug}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
-5. Update the tracker: in data/applications.md, for the row #${input}, ONLY update the PDF column from ❌ to ✅.
-Do not submit anything anywhere.
-
-End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`
-:
-`You are generating the user's ATS-optimized, TAILORED COVER LETTER PDF for application #${input}, headless, on their machine. Run the REAL career-ops "cover" mode — follow modes/cover.md EXACT STEPS(do not improvise a format).
-1. Read the evaluation report at ${repF}.
-2. Read modes/cover.md and follow all EXACT STEPS within, LOAD any requiered files, EXECUTE any script from the steps and report any failure.
-4. After all the steps in modes/cover.md, confirm that there is a json file in /output/cover-payload-${companySlug}.json
-
-End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
-  }
-  if (kind === "fix-portal") {
-    return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
-1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
-2. Open portals.yml, find the "${input}" entry under tracked_companies, and update its careers_url (and any api/slug field) to the suggested WORKING ATS URL. Change ONLY this one company; preserve all other YAML structure, comments and formatting exactly.
-3. Re-run \`node verify-portals.mjs\` and confirm "${input}" now shows ✅ live (not ❌).
-If NO slug variant resolves, say so clearly and leave portals.yml unchanged. Never touch any other company.
-
-End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what you changed, ≤12 words}`;
-  }
-  // evaluate (default) — run the REAL oferta mode + persist canonically
-  return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${today}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
-
-1. Read modes/_shared.md and modes/oferta.md and follow the evaluation methodology EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").
-
-2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
-   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
-   b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
-   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
-   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
-
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
-
-After everything above is written and merged, output EXACTLY one final line, nothing after it:
-VERDICT: {score}/5 — {reason in 20 words or fewer}
-
-Posting URL: ${input}`;
-}*/
 
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string };
@@ -112,6 +47,7 @@ export async function POST(req: Request) {
     });
   }
   const { spec, binPath } = resolved;
+  //logger.info(`resolvedCli ${cliId} >>`, {...spec, hasPar: typeof spec.parseEvent}); //just to see
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
@@ -165,16 +101,21 @@ export async function POST(req: Request) {
   // explicit that a guessed date is worse than an absent one (the POSTED column
   // renders absent as `—`, a wrong date as a fresh req). Unknown URL → undefined
   // → the prompt writes no segment at all.
-  const postedAt =
-    kind === "evaluate"
-      ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
-      : undefined;
-
-  //const prompt = buildPrompta(kind, input, readMemory(), today);
-  const prompt = buildPrompt({kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths } ); //bof lang will default
+  const postedAt = kind === "evaluate" ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input) : undefined;
 
   const isClaude = cliId === "claude";
   const isOllama = cliId === "ollama";
+
+  const opts = {kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths };//bof lang will default
+  let sysPrompt = ''
+  let instructions = ''
+  if(isOllama){
+    sysPrompt = buildSysPrompt(kind, "apiRun");  //no need to pass in whole opts..
+    instructions = apiRunSesshInstructions(opts);
+  }
+
+  const prompt = isOllama ? sysPrompt : buildPrompt(opts);  //{kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths }
+
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate' runs the REAL mode + persists canonical artifacts →
   // it needs Write + Bash (reserve-report-num / merge-tracker / write the
@@ -184,6 +125,7 @@ export async function POST(req: Request) {
     kind === "evaluate" || kind === "fix-portal" || kind === "pdf" || kind === "cover"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
+  
   const args = isClaude
     ? ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
        "--permission-mode", "acceptEdits",
@@ -198,6 +140,8 @@ export async function POST(req: Request) {
       '--question',
       `${input}`,
       "--prompt",
+      instructions,
+      "--sys_prompt",
       prompt,
       "--allowedTools",
       tools.allowed, 
@@ -228,8 +172,11 @@ export async function POST(req: Request) {
 
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
-  logger.info("🤖 api-Run::POST", {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}) 
+  let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}
+  logger.info("🤖 api-Run::POST", {...lo}) 
 
+  logger.toFile(filePath, `\n Start: ${instructions} \n with context: \n ${prompt.length}`)
+  
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
@@ -434,7 +381,7 @@ export async function POST(req: Request) {
             case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: oContent}); //throw new Error("ERROR YO, no type!!");
             case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
             case 'Tokens': return saveTokens(line);
-            case 'Info': return logger.toFile(filePath, `\n ${oContent} \n`); //bon save this to file
+            case 'Info': return logger.toFile(filePath, `\n ${line} \n`); //bon save this to file
             case 'NodeType': return streamNodeAction(oContent);
             default:
               logger.error("🤖 processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})

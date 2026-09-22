@@ -98,8 +98,9 @@ export async function POST(req: Request) {
 
   const filePath = path.join(careerOpsRoot(), 'api-assistant.log'); 
   //console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`, args);
-  logger.info("🤖 api-assistant", {root: careerOpsRoot(), args: args})
+  //logger.info("🤖 api-assistant", {root: careerOpsRoot(), args: args})
 
+  logger.toFile(filePath, `\n Start: ${careerOpsRoot()} \n with args: \n ${args}`)
 
   const child = isOllama 
   ?
@@ -163,15 +164,28 @@ export async function POST(req: Request) {
         }
       };
 
-      const streamNodeAction = (chunk: string) => {
+      const streamNodeAction = (node: any) => {
+        let type = node.type || "";
+        let data = node.data || "No data" ;
+        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' ? 'status' : 'text'
+          
+        if (safeEnqueue(`${toSend} : ${data}`)) emitted = true;
+      }
+
+      const processOllamaEvt = (chunk: string) => {
         let oContent;
         try { 
-          oContent = JSON.parse(chunk); 
-          let type = oContent.type || "";
-          let data = oContent.data || "No data" ;
-          let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' ? 'status' : 'text'
-          
-          if (safeEnqueue(`${toSend} : ${data}`)) emitted = true;
+          oContent = JSON.parse(chunk);
+          let OfType = oContent.OfType || undefined
+          switch (OfType) { //smh falls through without return on a case smh
+            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: chunk}); //throw new Error("ERROR YO, no type!!");
+            case 'Result': return safeEnqueue(`${oContent.output ?? 'Nothing?'}` );
+            case 'Tokens': return logger.info("Tokens", {content: chunk}); //saveTokens(line);
+            case 'Info': return logger.toFile(filePath, `\n ${chunk} \n`); //bon save this to file
+            case 'NodeType': return streamNodeAction(oContent);
+            default:
+              logger.error("🤖 processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:chunk})
+          }
         } catch {
           //handle error?!? retry?
           //console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
@@ -184,7 +198,7 @@ export async function POST(req: Request) {
         //logger.info("🤖 apiAssistant::onEmit", {data: s})
         if(isOllama){
          
-          return streamNodeAction(s);
+          return processOllamaEvt(s);
         }
         
         if (safeEnqueue(s)) emitted = true;

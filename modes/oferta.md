@@ -646,7 +646,7 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 ## Post-evaluation
 
-**ALWAYS** Generate Blocks A through G in full, then:
+**ALWAYS** Generate Blocks A through G in full.
 
 ### 1. Save report .md
 

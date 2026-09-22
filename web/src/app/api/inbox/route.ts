@@ -58,7 +58,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid url (table-breaking characters)" }, { status: 400 });
   }
 
-  //const file = path.join(careerOpsRoot(), "data", "pipeline.md");
   let md: string;
   try {
     md = fs.readFileSync(file, "utf8");
