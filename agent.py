@@ -86,16 +86,16 @@ seed = random.randint(1, 100) #umm for model seed? toSee..
 model = OllamaModel(
     'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'temperature': 0.1,'top_k': 64, 'seed': seed, 'tool_choice': 'auto'}
+    settings={'temperature': 0.1,'top_k': 4, 'seed': seed, 'tool_choice': 'auto', "frequency_penalty":1.14}
 )
 # seed: int 
-# thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`. >> prolly no need as it's a thinking model.., 'thinking':'high'
+# thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`. >> prolly no need as it's a thinking model...,'thinking':'high'
 #removed 'timeout': 3_000, 'max_tokens': 8192, 
 # temperature good for Writing: 0.8-1.0 (toTry?**)  
 ## lower (0.0 to 0.2) to prioritize strict command logic over creative responses...umm?
 
 # 'top_k':40, >>to consider possible next 40 choices?--default >> Limits the number of tokens AI picks at each step
-### seem better when == 4 ? >>meh toSee with 64 
+### seem better when == 4 ? >>meh toSee with 64...umm nope
 
 # "top_p": 0.95 --toTry? >>Limits responses to the most probable tokens
 ### So 0.1 means only the tokens comprising the top 10% probability mass are considered.
@@ -106,12 +106,12 @@ model = OllamaModel(
 # model_settings={
 #        "extra_body": {
 #            "num_ctx": 8192  # Set your desired context window here
-#        }} ## 8192-16384 for long documents >>NOPE abrupt stop when set...
+#        }} ## 8192-16384 for long documents >>NOPE abruptly stop when set...
 ##umm could try and set different temperature, top_k || top_p per run as well? toTry**
 
 
 def write_to_file(indat, filename="output.txt"):
-    with open(filename, "w", encoding='utf-8') as file: #encoding makes diff?
+    with open(filename, "w") as file: # encoding='utf-8' >> encoding makes diff? bon removed for now
       file.write(indat)
 
 def read_from_file(filePath):
@@ -125,7 +125,8 @@ def read_from_file(filePath):
     except OSError as e:
         # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {filePath}: {e}. Retry in a moment.")
-    
+
+''' 
 agent = Agent(
   model,
   #deps_type=str,
@@ -144,8 +145,8 @@ agent = Agent(
     #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
     #Thinking(effort='high')
     ])
+'''
 
-#dirr = Path(__file__).parent #ToSee if should use above...
 #retries={'tools': 3, 'output': 1} to allow tool retry smh
 ##Shell(cwd='.', allowed_commands=['ls', 'node', 'cd']), ##huh with allowed_commands borks with ValueError::'Specify allowed_commands or denied_commands, not both.'
 ####weird...so default denied_commands but cant set allowed_commands too!?! weiiird!
@@ -158,13 +159,48 @@ agent = Agent(
 
 
 def validate_path(ctx: RunContext[Any], path: str, content: str) -> None:
-    """Validate that a path is provided"""
-    if not path.strip():
-      raise ModelRetry(f'The field path is requiered')
-    
- # (args_validator=validate_path) >>seem to make it slower?
-@agent.tool(name="write_file", description='Writes given content to a file', retries=2)
-async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
+  """Validate that a path is provided"""
+  if not path.strip():
+    raise ModelRetry(f'The field path is requiered')
+
+def return_json(data) -> str:
+  return json.dumps(data,indent=2) #umm indent?
+
+
+#assistant agent --prolly no need for sys_prompt param? instructions prolly ok?
+#umm should still pass in sys prompt with all those files context?
+def create_assistant_agent():
+  # 1. Define dependencies if needed (optional)
+  # class MyDeps: ...
+  
+  # 2. Instantiate the agent
+  #agent = Agent(
+  #    model="openai:gpt-4o-mini",
+  #    # deps_type=MyDeps, # if using dependencies
+  #    system_prompt="You are a helpful assistant."
+  #)
+  assistant = Agent(
+    model,
+    #deps_type=str,
+    instructions="Use the registered tool functions",
+    retries={'tools': 3, 'output': 1},
+    capabilities=[
+      #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
+      #FileSystem(root_dir='.'),
+      #refunds
+      WebSearch(local='duckduckgo'),
+      WebFetch(local=True),
+      Shell(cwd='.'),
+      #RepoContext(
+      #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
+      #  filenames=('AGENTS.md'), #'CLAUDE.md',
+      #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
+      #Thinking(effort='high')
+    ])
+
+  # 3. Register tools using decorators
+  @assistant.tool(name="write_file", description='Writes given content to a file', retries=2)
+  async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
     #"""
     #Custom write logic: e.g., validate content, use specific storage, 
     #or trigger side effects before writing.
@@ -187,8 +223,9 @@ async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: s
       # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
 
-@agent.tool(name="read_file", description='Reads files and returns their content')
-async def read_file(ctx: RunContext[Any], fpath: str) -> str:
+
+  @assistant.tool(name="read_file", description='Reads files and returns their content')
+  async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
     conte = read_from_file(real_path)
@@ -197,50 +234,88 @@ async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
     return conte #.content
 
-@agent.tool(name="append_to_file", description='Appends given content to an existing file')
-def append_to_file(ctx: RunContext[Any], args: WriteFileArgs) -> str: #path: str, content_chunk: str
+  # 4. Return the configured agent
+  return assistant
+
+
+def create_run_agent(sys_prompt):
+  # 1. Define dependencies if needed (optional)
+  # class MyDeps: ...
+  
+  # 2. Instantiate the agent
+  agent = Agent(
+    model,
+    #deps_type=str,
+    system_prompt=sys_prompt,
+    #instructions="Use the registered tool functions",
+    retries={'tools': 3, 'output': 1},
+    capabilities=[
+      #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
+      #FileSystem(root_dir='.'),
+      #refunds
+      WebSearch(local='duckduckgo'),
+      WebFetch(local=True),
+      Shell(cwd='.'),
+      #RepoContext(
+      #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
+      #  filenames=('AGENTS.md'), #'CLAUDE.md',
+      #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
+      #Thinking(effort='high')
+    ])
+
+  # 3. Register tools using decorators
+ # (args_validator=validate_path) >>seem to make it slower?
+  @agent.tool(name="write_file", description='Write given content to a file', retries=2)
+  async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
+    #"""
+    #Custom write logic: e.g., validate content, use specific storage, 
+    #or trigger side effects before writing.
+    #""" # Example: Custom validation or logic
+    if not args.content.strip():
+      return f"Error: Cannot write empty file to {args.path}"
+
+    real_path = os.path.join(os.getcwd(),args.path)
+    #print(f'\ncustom_write_file:, {args.path},{real_path}',flush=True) #, os.path.dirname(__file__))
+    if 'forbidden' in args.content.lower():
+      raise ValueError("Content contains forbidden words")
+    
+    try:
+      write_to_file(args.content,real_path)
+      return f"Successfully wrote {len(args.content)} characters to {real_path}"
+    except PermissionError:
+      # Terminal — model should adapt, not retry the same call
+      raise ToolFailed(f"Permission denied writing to {real_path}. Try a different path.")
+    except OSError as e:
+      # Transient — model should retry (e.g. file lock)
+      raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
+
+  @agent.tool(name="read_file", description='Reads files and returns their content')
+  async def read_file(ctx: RunContext[Any], fpath: str) -> str:
+    # Custom validation or logging   #=Path(self.root_dir), 
+    real_path = os.path.join(os.getcwd(),fpath)
+    conte = read_from_file(real_path)
+    #print(f'\ncustom_read_file:\n',conte)
+    #cont = await ctx.emit(CustomReadEvent(path=real_path, content=conte))
+    #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
+    return conte #.content
+
+  @agent.tool(name="append_to_file", description='Appends given content to an existing file')
+  def append_to_file(ctx: RunContext[Any], args: WriteFileArgs) -> str: #path: str, content_chunk: str
     """Append a chunk of text to a specific file path.""" 
     real_path = os.path.join(os.getcwd(),args.path)
-    with open(real_path, "a") as file: #"example.txt"
+    with open(real_path, "a") as file:
         file.write(args.content) #content_chunk
     return f"Successfully appended {len(args.content)} to {real_path}"
 
-##tosee below
-@agent.instructions
-def instructions() -> str:  
-  return f'Use the registered read_file, write_file and append_to_file tool functions'
+  ##tosee below >>meh...prolly no need as gets instructions anyway
+  #@agent.instructions
+  def instructions() -> str:  
+    return f'Use the registered read_file, write_file and append_to_file tool functions'
 
+  # 4. Return the configured agent
+  return agent
 
-def return_json(data) -> str:
-  return json.dumps(data,indent=2) #umm indent?
-
-#@agent.instructions  
-def add_the_users_name(ctx: RunContext[str]) -> str:
-  return f"The user's name is {ctx.deps}."
-
-#@agent.instructions
-def add_the_date() -> str:  
-  return f'The date is {date.today()}.'
-
-async def get_daate() -> str:
-  result = await agent.run('What is the date?', deps='Frank')
-  return result.output
-
-def get_date(q) -> str: #synchronous
-  result = agent.run_sync(q, deps='Frank')
-  ##sys.stderr.write('\n[%s] %s%s ...%s\r' % ("date", "Frank", '%', result.usage)) 
-  sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:date", result.usage, result.all_messages())) 
-  ### RunUsage(input_tokens=49, output_tokens=91, requests=1)
-  return result.output
-
-def ask_question(q, instructions) -> str:
-  result = agent.run_sync(instructions, deps='Frank')  #q, instructions=instructions
-  #HUH using the instructions as user_prompt only makes for better response!!
-  # #all_messages() cant be json serialized so using all_messages_json() > messages dont lose their type(prolly ok if == 'part_kind' ?)
-  #sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Ask", result.usage,result.all_messages_json().decode('utf-8') )) # str(content,'utf-8')
-  sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Asky", result.usage,result.all_messages() )) 
-  return result.output
-
+'''
 ## for when need subagents? wonder if ok to declare them here?
 ##could filter more frmTask to allow more Tools?
 def delegate_question(prompt, frmTask) -> str:
@@ -275,6 +350,11 @@ def with_capture(q):
     else:
       sys.stderr.write('\n[%s] %s :: \n %s ...\n' % ("Info:Capture",result.usage ,messages))
       print(f'{return_json({'OfType': 'Result','daQ':q, 'output':result.output})}', flush=True)
+
+def create_agent(sys_prompt,parent) -> Agent:
+  return Agent(model,deps_type=str,system_prompt=sys_prompt)
+
+'''
 
 nodes = []
 def record_event(event: AgentStreamEvent) -> None:
@@ -344,7 +424,7 @@ def record_event(event: AgentStreamEvent) -> None:
     )
 
 
-async def with_iter(q, instructions, use_question, sys_prompt = None):
+async def with_iter(agent, q, instructions, use_question,sys_prompt = None):
   """
   Pass in question prompt for LLM to iter over agent graph's nodes as they are executed.
   Args:
@@ -355,7 +435,7 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
   Returns:
     Agent output results
   """
-  sys.stdout.write(f'{return_json({'OfType': 'Info', 'Seed': seed, 'usedQuestion?':use_question, 'prompt':q, 'ollama_at':ollama_base_url, 'hasSysPrompt': sys_prompt is None})}') #'instru': instructions
+  sys.stdout.write(return_json({'OfType': 'Info', 'Seed': seed, 'usedQuestion?':use_question, 'prompt':q, 'ollama_at':ollama_base_url,'instru': instructions }))  # 'hasSysPrompt': sys_prompt is not None
   sys.stdout.flush()
   #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' or flush as above smh
   # deps='Frank',
@@ -363,13 +443,13 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
   #nodes: list[str] = [] #was output_messages..was giving probs?
 
   async with agent.iter(user_prompt=q if use_question else instructions,
-                        instructions=instructions if use_question else sys_prompt, #None, 
+                        instructions=instructions if use_question else sys_prompt, #bon for api-run see if better to use instructions instead of user_prompt..>>
                         retries=3) as agent_run:
     async for node in agent_run:
       #sys.stderr.write(f'{return_json({'Action':repr(node)})}')
       if Agent.is_user_prompt_node(node):
-        nodes.append(f'=== UserPromptNode: {node.user_prompt} ===')
-        print(f'{return_json({'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt}' })}', flush=True) #>>oldie >> sys.stdout.write
+        nodes.append(f'=== UserPromptNode ===') #{node.user_prompt}
+        print(f'{return_json({'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt is None} <> {node.instructions is None}' })}', flush=True) #>>oldie >> sys.stdout.write
       elif Agent.is_model_request_node(node):
         nodes.append('=== ModelRequestNode: streaming partial request tokens ===') #output_messages
         print(f'{return_json({'OfType': 'NodeType','type':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
@@ -384,7 +464,6 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
               print(f'{return_json({'OfType': 'NodeType','type':'FinalResultEvent','data': f'({event.tool_name})' })}', flush=True)
               final_result_found = True
               break
-
             #continue with streaming
             record_event(event)
 
@@ -392,8 +471,8 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
             # Once the final result is found, we can call `AgentStream.stream_text()` to stream the text.
             # A similar `AgentStream.stream_output()` method is available to stream structured output.
             async for output in request_stream.stream_text(): 
-              #nodes.append(f'[Output] >> ModelRequestNode >> {output}') ##too noisy
-              ##could check whole request_stream that not failed...todo**
+              nodes.append(f'[Output] >> ModelRequestNode >> {output}') ##too noisy
+              ##could check whole request_stream that not failed?...todo**
               continue
       elif Agent.is_call_tools_node(node):
         nodes.append(f'\n === CallToolsNode: streaming partial response & tool usage ===')
@@ -410,7 +489,8 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
 
       #nodes.append(node)
       sys.stderr.write(f'{return_json({'Action':repr(node)})}')
-   
+
+  #RunUsage(input_tokens=49, output_tokens=91, requests=1)
   usage = agent_run.result.usage
   tokens = {'OfType': 'Tokens','input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
   print(f'{return_json(tokens)}', flush=True)
@@ -424,9 +504,6 @@ async def with_iter(q, instructions, use_question, sys_prompt = None):
   #sys.stderr.flush()
   return agent_run.result.output
 
-
-def create_agent(sys_prompt,parent) -> Agent:
-  return Agent(model,deps_type=str,system_prompt=sys_prompt)
 
 async def main():
   parser = argparse.ArgumentParser(description='Agent script to access local Ollama LLM')
@@ -472,15 +549,18 @@ async def main():
   sys_prompt = args.sys_prompt
 
   use_question = True if fromScript == 'api-assistant' else False
+
+  my_agent = create_run_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent()
+
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
-    result = await with_iter(q=question, instructions=prompt, use_question=use_question,sys_prompt=sys_prompt)
+    result = await with_iter(my_agent, q=question, instructions=prompt, use_question=use_question) #,sys_prompt=sys_prompt
     #agenty = create_agent(prompt,fromScript) #toUse? toTest**
-    d = {'OfType': 'Result','daQ':question, 'output':result }
+    d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript }
     print(f'{return_json(d)}', flush=True)
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])
-    sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork?
+    #sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork? >>ouf can make for a laaarge file
 
   except Exception as e:
     #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))

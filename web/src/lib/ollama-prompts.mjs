@@ -412,8 +412,8 @@ function assembleContext(sections) {
  */
 function loadContextFiles(mode){
     switch (mode) {
-    case undefined: //what to do here? log?
-    case 'evaluate': return { sharedContent: sharedContext, ofertaContent : ofertaMode, cvContent: cvContent, profileYml:profileConfigYml, profileContent:profileContext };
+    case undefined: //what to do here? log?  
+    case 'evaluate': return { ofertaContent : ofertaMode, cvContent: cvContent, profileYml:profileConfigYml, profileContent:profileContext }; //removed sharedContent: sharedContext,
     case 'fix-portal': return { }; //only need to load portals.yml --import loadYaml func? 
     case 'pdf': return { pdfContent: pdfMode, cvContent: cvContent, profileYml:profileConfigYml};
     case 'cover': return { coverContext: coverMode, cvContent: cvContent, profileYml: profileConfigYml, profileContent:profileContext };
@@ -447,7 +447,8 @@ export const apiRunBaseInstructions = (evalMode) => { //smaller than 'apiRunInst
 
 }
 
-//should prolly rename this to extra operating rules for this session
+const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
+
 export const apiRunSesshInstructions = ({ kind, input, memory, today, postedAt, lang, paths }) => {
   let baseInstru =  `${apiRunBaseInstructions(kind)}`;
   let something = `═══════════════════════════════════════════════════════
@@ -455,7 +456,7 @@ IMPORTANT OPERATING INSTRUCTIONS FOR THIS SESSION
 ═══════════════════════════════════════════════════════`; //rule or instructions?
   const languageDirective = `\n\nWrite all human-facing output in "${lang ?? 'en'}" regardless of the language of these instructions or the job description.\n`; //${marketNote}
   const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective;
-  //const postedSegment = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : ""; need : const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
+  const postedSegment = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "";
 
   switch (kind) {
     case undefined:
@@ -491,15 +492,22 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 Target: ${input}`;
     case 'evaluate': return `${baseInstru}\n${something}
 
-1. Read modes/oferta.md and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist.
+1. Read modes/oferta.md and follow it EXACTLY — EVERY section its report template specifies, in its order, including the Machine Summary. Do not treat any list of sections in THIS prompt as the set to produce; that file is the only source of truth for which sections exist. Ground the fit in THIS person: use cv.md, config/profile.yml and modes/_profile.md.
 
   Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
 
   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
-2. Ground the fit in THIS person: use cv.md, config/profile.yml and modes/_profile.md.
-3. After persisting the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens). 
-4. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
-5. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+
+2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
+   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
+   b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
+   c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
+      num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
+      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
+   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
+
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 20 words or fewer}
@@ -510,18 +518,9 @@ Posting URL: ${input}`;
       console.error(`⚠️   ${kind} Not known...Error: Nope for  apiRunSesshInstructions \n`);
       return '';
   }
-  ////umm wonder if will do extra reading of mentionned files or would know that in context? --toSee
-  //or that the batch/tracker-additions file will be written...lool prolly not?
 
-/*2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
-   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
-   b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
-      num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
-   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
-   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written.
- */
+  ////umm wonder if will do extra reading of mentionned files or would know that in context? >>yup dont seem to do calls to read files
+  //or that the batch/tracker-additions file will be written...lool prolly not? >>yup nope..had to reput the rules in...
 }
 
 

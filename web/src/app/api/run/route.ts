@@ -353,17 +353,17 @@ export async function POST(req: Request) {
 
       const streamNodeAction = (node: any) => { //todo** move this into run-cli-support.mjs
         let type = node.type || "";
-        let data = node.data || "No data" ;
+        let data = node.data || "No data" ; 
             //skip for 'UserPromptNode'  && 'ModelRequestNode' && 'CallToolsNode' ? 
             //FunctionToolResultEvent as status? >> use ToolReturnPart instead? ..prolly both
-        if (type == 'UserPromptNode'){
-          logger.info("🤖 UserPromptNode", node);
+        if (type == 'UserPromptNode' || type == 'FinalResultEvent' || type == 'FinalEndNode' ){
+          logger.info(`🤖 ${type}`, node);
           return
         }
         
         sendAgentText(`${type} : ${data}`)
         //use if and build object...
-        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'FinalResultEvent' || type == 'UserPromptNode' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
+        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'UserPromptNode' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
         send({ type: toSend, label: `${toSend}`, name: `${data}` });
         emittedText = true;
       }
@@ -442,7 +442,7 @@ export async function POST(req: Request) {
 
       child.stderr.on("data", (d: Buffer) => { //chunk: string
         const s = d.toString();
-        logger.info("🤖  stream::apiRun::stderr", { size: d.byteLength})
+        logger.info("🤖  stream::apiRun::stderr", { size: s.length})
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         //fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
@@ -452,8 +452,8 @@ export async function POST(req: Request) {
           //console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`,s) //test not premature stream closing..the string trimming en plus smh
           //sawError = true;
           //send({ type: "error", msg: s.trim().slice(0, 200) });
-          let nodeT = s.slice(0, 50);
-          logger.error("🤖  stream::apiRun::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) //on:'stderr',
+          let nodeT = s.slice(0, 100);
+          logger.error("🤖  onStderr", { size: s.length, message: 'some matching errs', type: nodeT}) //on:'stderr',
         }
       });
       
