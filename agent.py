@@ -58,7 +58,7 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai_harness import Shell, FileSystem
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 #from pydantic_ai_harness.context import RepoContext
-from seeds.tool_output import Fruit, Vehicle, WriteFileArgss #toSee >> umm think borks script importing WriteFileArgs due to missing pydantic lib? --guess ok even when here..
+from seeds.tool_output import Fruit, Vehicle, WriteFileArgss #toSee >> umm think borks script importing WriteFileArgs due to missing pydantic lib? or is it using? --guess ok when imported...
 import asyncio
 
 
@@ -86,7 +86,7 @@ seed = random.randint(1, 100) #umm for model seed? toSee..
 model = OllamaModel(
     'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'temperature': 0.1,'top_k': 4, 'seed': seed, 'tool_choice': 'auto', "frequency_penalty":1.14}
+    settings={'temperature': 0.1, 'seed': seed, 'tool_choice': 'auto', "frequency_penalty":1.14}
 )
 # seed: int 
 # thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`. >> prolly no need as it's a thinking model...,'thinking':'high'
@@ -95,7 +95,7 @@ model = OllamaModel(
 ## lower (0.0 to 0.2) to prioritize strict command logic over creative responses...umm?
 
 # 'top_k':40, >>to consider possible next 40 choices?--default >> Limits the number of tokens AI picks at each step
-### seem better when == 4 ? >>meh toSee with 64...umm nope
+### seem better when == 4 ? >>meh toSee with 64...umm nope >>removing it
 
 # "top_p": 0.95 --toTry? >>Limits responses to the most probable tokens
 ### So 0.1 means only the tokens comprising the top 10% probability mass are considered.
@@ -111,8 +111,13 @@ model = OllamaModel(
 
 
 def write_to_file(indat, filename="output.txt"):
-    with open(filename, "w") as file: # encoding='utf-8' >> encoding makes diff? bon removed for now
-      file.write(indat)
+  with open(filename, "w",encoding='utf-8') as file: # encoding='utf-8' >> encoding makes diff? bon removed for now
+    try:
+      written = file.write(indat)
+      return written
+    except OSError as e:
+        # Transient — model should retry (e.g. file lock)
+      raise ModelRetry(f"Transient error writing to {filename}: {e}. Retry in a moment.")
 
 def read_from_file(filePath):
    with open(filePath, 'r', encoding='utf-8') as file:
@@ -121,10 +126,10 @@ def read_from_file(filePath):
       return str(contents) #toSee #f"{contents}"
     except PermissionError:
         # Terminal — model should adapt, not retry the same call
-      raise ToolFailed(f"Permission denied writing to {filePath}. Try a different path.")
+      raise ToolFailed(f"Permission denied reading from {filePath}. Try a different path.")
     except OSError as e:
         # Transient — model should retry (e.g. file lock)
-      raise ModelRetry(f"Transient error writing {filePath}: {e}. Retry in a moment.")
+      raise ModelRetry(f"Transient error reading from {filePath}: {e}. Retry in a moment.")
 
 ''' 
 agent = Agent(
@@ -199,22 +204,21 @@ def create_assistant_agent():
     ])
 
   # 3. Register tools using decorators
-  @assistant.tool(name="write_file", description='Writes given content to a file', retries=2)
+  @assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
   async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
-    #"""
-    #Custom write logic: e.g., validate content, use specific storage, 
-    #or trigger side effects before writing.
-    #""" # Example: Custom validation or logic
     if not args.content.strip():
+      print(f'\nassistant_write_file:, {args.path} Error: no content? {args.content}',flush=True)
       return f"Error: Cannot write empty file to {args.path}"
 
     real_path = os.path.join(os.getcwd(),args.path)
     #print(f'\ncustom_write_file:, {args.path},{real_path}',flush=True) #, os.path.dirname(__file__))
     if 'forbidden' in args.content.lower():
-      raise ValueError("Content contains forbidden words")
+      print(f'\nassistant_write_file:, {args.path} Error: forbidden in content? \n {args.content}',flush=True)
+      raise ValueError("Content contains forbidden words") #handle here...todo**
     
     try:
-      write_to_file(args.content,real_path)
+      succ = write_to_file(args.content,real_path)
+      print(f'\nassistant_write_file:,{succ} <> \n {args.path},{real_path} >> {len(args.content)}',flush=True)
       return f"Successfully wrote {len(args.content)} characters to {real_path}"
     except PermissionError:
       # Terminal — model should adapt, not retry the same call
@@ -231,7 +235,7 @@ def create_assistant_agent():
     conte = read_from_file(real_path)
     #print(f'\ncustom_read_file:\n',conte)
     #cont = await ctx.emit(CustomReadEvent(path=real_path, content=conte))
-    #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
+    print(f'\nassistant_read_file:', fpath, Path.cwd(), real_path, conte, flush=True) #kLawGen/backend
     return conte #.content
 
   # 4. Return the configured agent
@@ -247,7 +251,7 @@ def create_run_agent(sys_prompt):
     model,
     #deps_type=str,
     system_prompt=sys_prompt,
-    #instructions="Use the registered tool functions",
+    instructions="Use the registered function tools",
     retries={'tools': 3, 'output': 1},
     capabilities=[
       #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
@@ -264,23 +268,22 @@ def create_run_agent(sys_prompt):
     ])
 
   # 3. Register tools using decorators
- # (args_validator=validate_path) >>seem to make it slower?
-  @agent.tool(name="write_file", description='Write given content to a file', retries=2)
+ # (args_validator=validate_path) >>seem to make it slower?--toTry** without ctx?--umm does passing the agent around actually loses the tools?@?
+  @agent.tool #(name="write_file", description='Write argument contents to a file') #, retries=2
   async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
-    #"""
-    #Custom write logic: e.g., validate content, use specific storage, 
-    #or trigger side effects before writing.
-    #""" # Example: Custom validation or logic
     if not args.content.strip():
+      sys.stderr.write(f'\nagent_write_file:, {args.path} Error: no content? {args.content}')
       return f"Error: Cannot write empty file to {args.path}"
 
     real_path = os.path.join(os.getcwd(),args.path)
     #print(f'\ncustom_write_file:, {args.path},{real_path}',flush=True) #, os.path.dirname(__file__))
     if 'forbidden' in args.content.lower():
-      raise ValueError("Content contains forbidden words")
+      sys.stderr.write(f'\nagent_write_file:, {args.path} Error: forbidden in content? \n {args.content}')
+      raise ValueError("Content contains forbidden words")  #handle here...todo**
     
     try:
-      write_to_file(args.content,real_path)
+      succ = write_to_file(args.content,real_path)
+      sys.stderr.write(f'\nagent_write_file:,{succ} <> \n {args.path},{real_path} >> {len(args.content)}')
       return f"Successfully wrote {len(args.content)} characters to {real_path}"
     except PermissionError:
       # Terminal — model should adapt, not retry the same call
@@ -289,23 +292,34 @@ def create_run_agent(sys_prompt):
       # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
 
-  @agent.tool(name="read_file", description='Reads files and returns their content')
+  @agent.tool #(name="read_file", description='Reads files and returns their content')
   async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
     conte = read_from_file(real_path)
     #print(f'\ncustom_read_file:\n',conte)
     #cont = await ctx.emit(CustomReadEvent(path=real_path, content=conte))
-    #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
-    return conte #.content
+    sys.stderr.write(f'\nagent_read_file:, {fpath}, {Path.cwd()}, {real_path}') # \n\n {conte} 
+    return conte
 
-  @agent.tool(name="append_to_file", description='Appends given content to an existing file')
+  @agent.tool #(name="append_to_file", description='Append given content to an existing file')
   def append_to_file(ctx: RunContext[Any], args: WriteFileArgs) -> str: #path: str, content_chunk: str
     """Append a chunk of text to a specific file path.""" 
     real_path = os.path.join(os.getcwd(),args.path)
     with open(real_path, "a") as file:
         file.write(args.content) #content_chunk
     return f"Successfully appended {len(args.content)} to {real_path}"
+
+  @agent.tool_plain #(name="file_exists", description='Checks that a file exist at the given path')
+  def file_exists(fpath: str) -> bool:  #ctx: RunContext[Any], 
+    """Checks that a file exist at the given path.""" 
+    real_path = os.path.join(os.getcwd(),fpath)
+    if os.path.exists(real_path):
+      sys.stderr.write(f'\n file_exists:, {fpath}, {real_path}, {os.path.isfile(real_path)}')
+      return True
+
+    sys.stderr.write(f'\n file_exists: NOPE :(, {fpath}, {real_path} ')
+    return False
 
   ##tosee below >>meh...prolly no need as gets instructions anyway
   #@agent.instructions
@@ -362,7 +376,8 @@ def record_event(event: AgentStreamEvent) -> None:
     nodes.append(f'[Request] Starting part {event.index}: {event.part!r} \n')
     if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
       nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
-      print(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','data': f'{event.part.tool_name}', 'from': f'{event.previous_part_kind}' })}', flush=True)
+      sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','data': f'{event.part.tool_name}', 'from': f'{event.previous_part_kind}' })}') #, flush=True)
+      #sys.stderr.write
 
   elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
     if isinstance(event.delta, TextPartDelta): 
@@ -384,7 +399,8 @@ def record_event(event: AgentStreamEvent) -> None:
     nodes.append(
       f'[ToolReturnPart] From {event.part.tool_name} with contents? => {event.part.has_content()}'
     )
-    print(f'{return_json({'OfType': 'NodeType','type':'ToolReturnPart','data': f'{event.part.tool_name} with  contents? => {event.part.has_content()} ' })}', flush=True)
+    toSend = {'OfType': 'NodeType','type':'ToolReturnPart','data':f'{event.part.tool_name} with  contents? => {event.part.has_content()}' }
+    sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
 
   elif isinstance(event.part, ThinkingPart): #?!? happens at end of all the multiple ThinkingPartDelta
     nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
@@ -396,13 +412,13 @@ def record_event(event: AgentStreamEvent) -> None:
     nodes.append(
       f'[FunctionToolCallEvent] Part {event.part.tool_name} with \n Args => {event.part.args!r}'
     )
-    print(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}', flush=True)
+    sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}') #, flush=True)
 
   elif isinstance(event,FunctionToolResultEvent):#ToolReturnPart | RetryPromptPart
     nodes.append(
       f'[FunctionToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
     )
-    print(f'{return_json({'OfType': 'NodeType', 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}', flush=True) #{event.part.content!r}
+    sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}') #, flush=True) #{event.part.content!r}
     if isinstance(event.part, ToolReturnPart):
       nodes.append(
         f'====[ToolReturnPart] Part >> {event.part!r}'
@@ -439,20 +455,20 @@ async def with_iter(agent, q, instructions, use_question,sys_prompt = None):
   sys.stdout.flush()
   #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' or flush as above smh
   # deps='Frank',
-  output_messages = [] 
   #nodes: list[str] = [] #was output_messages..was giving probs?
 
   async with agent.iter(user_prompt=q if use_question else instructions,
-                        instructions=instructions if use_question else sys_prompt, #bon for api-run see if better to use instructions instead of user_prompt..>>
+                        instructions=instructions if use_question else sys_prompt, 
                         retries=3) as agent_run:
     async for node in agent_run:
       #sys.stderr.write(f'{return_json({'Action':repr(node)})}')
       if Agent.is_user_prompt_node(node):
         nodes.append(f'=== UserPromptNode ===') #{node.user_prompt}
-        print(f'{return_json({'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt is None} <> {node.instructions is None}' })}', flush=True) #>>oldie >> sys.stdout.write
+        toSend = {'OfType': 'NodeType','type': 'UserPromptNode','data': f'{node.user_prompt is None} <> {node.instructions is None}' }
+        sys.stderr.write(f'{return_json(toSend)}')# , flush=True) #>>oldie >> sys.stdout.write
       elif Agent.is_model_request_node(node):
         nodes.append('=== ModelRequestNode: streaming partial request tokens ===') #output_messages
-        print(f'{return_json({'OfType': 'NodeType','type':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
+        #print(f'{return_json({'OfType': 'NodeType','type':'ModelRequestNode','data': 'streaming partial request tokens'})}', flush=True)
 
         async with node.stream(agent_run.ctx) as request_stream:
           final_result_found = False
@@ -461,7 +477,8 @@ async def with_iter(agent, q, instructions, use_question,sys_prompt = None):
               nodes.append(
                 f'[Result] The model started producing a final result (tool_name={event.tool_name})'
               )
-              print(f'{return_json({'OfType': 'NodeType','type':'FinalResultEvent','data': f'({event.tool_name})' })}', flush=True)
+              toSend = {'OfType': 'NodeType','type':'FinalResultEvent','data':f'({event.tool_name})' }
+              sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
               final_result_found = True
               break
             #continue with streaming
@@ -473,10 +490,11 @@ async def with_iter(agent, q, instructions, use_question,sys_prompt = None):
             async for output in request_stream.stream_text(): 
               nodes.append(f'[Output] >> ModelRequestNode >> {output}') ##too noisy
               ##could check whole request_stream that not failed?...todo**
-              continue
+              #continue
+              #sys.stderr.write(f'[Output] >> ModelRequestNode >> {output}') #toSee
       elif Agent.is_call_tools_node(node):
         nodes.append(f'\n === CallToolsNode: streaming partial response & tool usage ===')
-        print(f'{return_json({'OfType': 'NodeType','type':'CallToolsNode','data': "streaming partial response & tool usage"})}', flush=True)
+        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'CallToolsNode','data': "streaming partial response & tool usage"})}') #, flush=True)
         async with node.stream(agent_run.ctx) as handle_stream:
           async for event in handle_stream:
             record_event(event)
@@ -485,7 +503,7 @@ async def with_iter(agent, q, instructions, use_question,sys_prompt = None):
         assert agent_run.result is not None
         assert agent_run.result.output == node.data.output
         nodes.append(f'=== Final Agent Output: {agent_run.result.output} ===') #output_messages
-        print(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','data': f'{node.data.output}' })}', flush=True)
+        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','data': f'{node.data.output}' })}') #, flush=True)
 
       #nodes.append(node)
       sys.stderr.write(f'{return_json({'Action':repr(node)})}')

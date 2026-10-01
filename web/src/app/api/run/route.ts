@@ -7,7 +7,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
-import { buildSysPrompt, apiRunSesshInstructions } from "@/lib/ollama-prompts.mjs"; //Olama system prompts
+import { basePrompt, buildSysPrompt, apiRunSesshInstructions } from "@/lib/ollama-prompts.mjs"; //Olama system prompts
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
@@ -110,11 +110,12 @@ export async function POST(req: Request) {
   let sysPrompt = ''
   let instructions = ''
   if(isOllama){
-    sysPrompt = buildSysPrompt(kind, "apiRun");  //no need to pass in whole opts..
+    sysPrompt = basePrompt(); //oldie but goes over the context smh //buildSysPrompt(kind, "apiRun");
+    buildSysPrompt(kind, "apiRun"); //just to see...
     instructions = apiRunSesshInstructions(opts);
   }
 
-  const prompt = isOllama ? sysPrompt : buildPrompt(opts);  //{kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths }
+  const prompt = isOllama ? sysPrompt : buildPrompt(opts); 
 
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate' runs the REAL mode + persists canonical artifacts →
@@ -298,7 +299,7 @@ export async function POST(req: Request) {
       const sendAgentText = (text: string) => {
         const visible = cvFilter ? cvFilter.push(text) : text;
         if (visible) logger.info("🤖 sendAgentText", {kind: kind, content: visible})
-        //send({ type: "text", text: visible }); //toReview** if shouldnt? add check: kind === "pdf"
+        //send({ type: "text", text: visible }); 
       };
 
       /** Surface non-fatal issues in the run log rather than only a server log. */
@@ -363,7 +364,7 @@ export async function POST(req: Request) {
         
         sendAgentText(`${type} : ${data}`)
         //use if and build object...
-        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'UserPromptNode' ? 'status' : 'text' //add in here 'FunctionToolCallEvent?' //umm
+        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'UserPromptNode' ? 'status' : 'text'
         send({ type: toSend, label: `${toSend}`, name: `${data}` });
         emittedText = true;
       }
@@ -389,15 +390,14 @@ export async function POST(req: Request) {
 
         } catch {
           console.error(`🤖   processOllamaEvt >>Ollama...ERROR json!! \n ${line} \n`);
-
-          //send({ type: "text", text: "Received some json!!"});
         }
       }
       
       child.stdout.on("data", (d: Buffer) => { //chunk: string
         if (closed) return;
         if (isOllama){
-          return processOllamaEvt(d.toString()); //try with toString('utf8') ?
+          logger.info("🤖  stream::apiRun::data", { size: d.length})
+          return processOllamaEvt(d.toString('utf-8')); //try with toString('utf8') ?
         }
 
         if (!isClaude) {
@@ -447,6 +447,9 @@ export async function POST(req: Request) {
         // the old narrow regex missed them (silent false "success").
         //fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
         logger.toFile(filePath, `\n ${s} \n`)
+        if (isOllama){
+          return processOllamaEvt(s); //try with toString('utf8') ?
+        }
         
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) { // |login|
           //console.log(`🤖  stream::apiRun::onData Errr...SHIET ERROR? \n\n`,s) //test not premature stream closing..the string trimming en plus smh

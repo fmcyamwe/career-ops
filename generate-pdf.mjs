@@ -44,6 +44,8 @@ import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-s
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
+import {default as logger } from "./lib/logger.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
 const workspaceRoot = resolveWorkspaceRoot(trackerPath);
@@ -1367,9 +1369,12 @@ async function generatePDF() {
     }
   }
 
+  logger.info("Bon about to renderHtmlToPdf", {dir:dirname(inputPath), rep: reportNum})
+  //info("Bon about to renderHtmlToPdf", {data: html, dir:dirname(inputPath), rep: reportNum })
+
   return renderHtmlToPdf(html, outputPath, {
     format,
-    baseDir: dirname(inputPath),
+    baseDir: dirname(inputPath), //toReview using same dir as inputPath?
     reportNum,
     inputPath,
     maxPages,
@@ -1638,7 +1643,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
   let browser = null;
   try {
-    browser = await launchBrowser({ headless: true });
+    browser = await launchBrowser({ headless: true }); //with false the window dissapear too fast tho:)
     return await renderInPage(browser, html, outputPath, opts);
   } finally {
     if (browser) {

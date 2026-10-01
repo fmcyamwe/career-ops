@@ -12,6 +12,7 @@ import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { NewUrlDialog } from "@/components/home/add-url-dialog";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -109,6 +110,7 @@ export function TodayDashboard({
             <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
               Open pipeline
             </Link>
+            <NewUrlDialog />
           </div>
           {inBetween && <QuickEvaluate />}
         </div>

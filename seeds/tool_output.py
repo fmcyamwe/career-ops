@@ -15,6 +15,6 @@ class Vehicle(BaseModel):
   name: str
   wheels: int
 
-class WriteFileArgs(BaseModel):
+class WriteFileArgss(BaseModel):
   path: str = Field(description="The target file path")
   content: str = Field(description="The file body content")

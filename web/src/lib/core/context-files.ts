@@ -38,6 +38,7 @@ export const coverMode   = readFile(path.join(careerOpsRoot(), 'modes','cover.md
 export const cvContent     = readFile(path.join(careerOpsRoot(), "cv.md"),  'cv.md'); //PATHS.cv
 export const profileContext = readFile(path.join(careerOpsRoot(), 'modes','_profile.md') , 'modes/_profile.md'); //PATHS.profile
 export const profileConfigYml    = readFile(path.join(careerOpsRoot(), 'config','profile.yml'), 'config/profile.yml'); //PATHS.profileYml
+export const batchPrompt    = readFile(path.join(careerOpsRoot(), 'batch','batch-prompt.md'), 'batch/batch-prompt.md');
 //prolly other stuff like data/applications.md? toReview**
 //also other like modes/latex.md ? for pdf...smh
 //modes/pipeline.md? for evaluate? 
