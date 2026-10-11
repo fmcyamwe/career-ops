@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Undo2 } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
-import type { InboxJob } from "@/lib/career-ops";
+import type { InboxJob, Application } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
@@ -11,6 +11,7 @@ import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
+import { report } from "process";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -21,7 +22,7 @@ const BATCH = 20;
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
-export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+export function InboxTriage({ inbox, reports }: { inbox: InboxJob[], reports:Application[] }) {
   const { jobs, startJob } = useJobs();
 
   // facets
@@ -134,6 +135,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const hiddenCount = hidden.length;
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
+
+
+  const hasBeenEvald = (url: string, job: InboxJob) => {
+
+    let insid = reports.filter((r) => job.company == r.company);  //no case sensitive...hopefully 
+    //SO bad having to only connect by company!!...like umm url!!
+    let isit = inbox.filter((s) => s.company  == job.company); //=== or == ?
+    //console.log("muahaha-hasBeenEvald", url, job.company, isit.length , insid );
+
+    return insid.length > 0 ;  //insid.some((s) => s.url === url); //=== or == ?
+  }
 
   const save = (job: InboxJob) => {
     if (isShortlisted(job.url)) return;
@@ -261,6 +273,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               scored={scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
+              hasReport={hasBeenEvald(e.job.url, e.job)}
               onToggleSelect={() => toggleSelect(e.job.url)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}

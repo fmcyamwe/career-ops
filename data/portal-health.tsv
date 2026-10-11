@@ -1,0 +1,185 @@
+timestamp	company	status
+2026-09-30T22:24:39.318Z	Anthropic	reachable
+2026-09-30T22:24:39.318Z	PolyAI	reachable
+2026-09-30T22:24:39.318Z	Parloa	reachable
+2026-09-30T22:24:39.318Z	Intercom	reachable
+2026-09-30T22:24:39.318Z	Hume AI	reachable
+2026-09-30T22:24:39.318Z	ElevenLabs	reachable
+2026-09-30T22:24:39.318Z	Deepgram	reachable
+2026-09-30T22:24:39.318Z	Vapi	reachable
+2026-09-30T22:24:39.318Z	Bland AI	reachable
+2026-09-30T22:24:39.318Z	Airtable	reachable
+2026-09-30T22:24:39.318Z	Vercel	reachable
+2026-09-30T22:24:39.318Z	Temporal	slug_gone
+2026-09-30T22:24:39.318Z	Arize AI	reachable
+2026-09-30T22:24:39.318Z	RunPod	slug_gone
+2026-09-30T22:24:39.318Z	Weights & Biases (CoreWeave)	reachable
+2026-09-30T22:24:39.318Z	Glean	reachable
+2026-09-30T22:24:39.318Z	Ada	slug_gone
+2026-09-30T22:24:39.318Z	Sierra	reachable
+2026-09-30T22:24:39.318Z	Decagon	reachable
+2026-09-30T22:24:39.318Z	Wealthsimple	reachable
+2026-09-30T22:24:39.318Z	Lindy	slug_gone
+2026-09-30T22:24:39.318Z	1password	reachable
+2026-09-30T22:24:39.318Z	gumloop	reachable
+2026-09-30T22:24:39.318Z	Deepset AI	reachable
+2026-09-30T22:24:39.318Z	Speechmatics	reachable
+2026-09-30T22:24:39.318Z	n8n	reachable
+2026-09-30T22:24:39.318Z	Zapier	reachable
+2026-09-30T22:24:39.318Z	Boomi	reachable
+2026-09-30T22:24:39.318Z	Cohere	reachable
+2026-09-30T22:24:39.318Z	LangChain	reachable
+2026-09-30T22:24:39.318Z	Pinecone	reachable
+2026-09-30T22:24:39.318Z	Mistral AI	empty
+2026-09-30T22:24:39.318Z	Palantir	reachable
+2026-09-30T22:24:39.318Z	Later	reachable
+2026-09-30T22:24:39.318Z	Safari AI	reachable
+2026-09-30T22:24:39.318Z	Hootsuite	reachable
+2026-09-30T22:24:39.318Z	Klue	reachable
+2026-09-30T22:24:39.318Z	Glacis AI	reachable
+2026-09-30T22:24:39.318Z	Sanctuary AI	slug_gone
+2026-09-30T22:24:39.318Z	Semios	reachable
+2026-09-30T22:24:39.318Z	Factorial	slug_gone
+2026-09-30T22:24:39.318Z	Attio	reachable
+2026-09-30T22:24:39.318Z	Tinybird	slug_gone
+2026-09-30T22:24:39.318Z	Clarity AI	slug_gone
+2026-09-30T22:24:39.318Z	Travelperk	slug_gone
+2026-09-30T22:24:39.318Z	Aleph Alpha	reachable
+2026-09-30T22:24:39.318Z	DeepL	reachable
+2026-09-30T22:24:39.318Z	Black Forest Labs	slug_gone
+2026-09-30T22:24:39.318Z	Helsing	reachable
+2026-09-30T22:24:39.318Z	Celonis	reachable
+2026-09-30T22:24:39.318Z	Contentful	reachable
+2026-09-30T22:24:39.318Z	GetYourGuide	reachable
+2026-09-30T22:24:39.318Z	HelloFresh	reachable
+2026-09-30T22:24:39.318Z	N26	reachable
+2026-09-30T22:24:39.318Z	Trade Republic	reachable
+2026-09-30T22:24:39.318Z	SumUp	reachable
+2026-09-30T22:24:39.318Z	Qonto	reachable
+2026-09-30T22:24:39.318Z	Forto	slug_gone
+2026-09-30T22:24:39.318Z	Lakera	empty
+2026-09-30T22:24:39.318Z	Scandit	reachable
+2026-09-30T22:24:39.318Z	Cradle	reachable
+2026-09-30T22:24:39.318Z	Hugging Face	reachable
+2026-09-30T22:24:39.318Z	Photoroom	reachable
+2026-09-30T22:24:39.318Z	Pigment	reachable
+2026-09-30T22:24:39.318Z	Wayve	reachable
+2026-09-30T22:24:39.318Z	Isomorphic Labs	reachable
+2026-09-30T22:24:39.318Z	PhysicsX	network
+2026-09-30T22:24:39.318Z	Stability AI	reachable
+2026-09-30T22:24:39.318Z	Synthesia	reachable
+2026-09-30T22:24:39.318Z	Faculty	reachable
+2026-09-30T22:24:39.318Z	Causaly	reachable
+2026-09-30T22:24:39.318Z	Lovable	reachable
+2026-09-30T22:24:39.318Z	Legora	reachable
+2026-09-30T22:24:39.318Z	Spotify	reachable
+2026-09-30T22:24:39.318Z	Vinted	slug_gone
+2026-09-30T22:24:39.318Z	Corti	reachable
+2026-09-30T22:24:39.318Z	Pleo	reachable
+2026-09-30T22:24:39.318Z	Templafy	slug_gone
+2026-09-30T22:24:39.318Z	Amplemarket	reachable
+2026-09-30T22:24:39.318Z	Perplexity	reachable
+2026-09-30T22:24:39.318Z	Clay Labs	reachable
+2026-09-30T22:24:39.318Z	Runway	slug_gone
+2026-09-30T22:24:39.318Z	Hightouch	reachable
+2026-09-30T22:24:39.318Z	WorkOS	reachable
+2026-09-30T22:24:39.318Z	Supabase	reachable
+2026-09-30T22:24:39.318Z	Resend	reachable
+2026-09-30T22:24:39.318Z	Clerk	reachable
+2026-09-30T22:24:39.318Z	Inngest	reachable
+2026-09-30T22:24:39.318Z	Tailscale	reachable
+2026-09-30T22:24:39.318Z	PlanetScale	reachable
+2026-09-30T22:24:39.318Z	Everflow	reachable
+2026-09-30T22:24:39.318Z	SolidJobs IT	reachable
+2026-10-09T21:50:08.895Z	Anthropic	reachable
+2026-10-09T21:50:08.895Z	PolyAI	reachable
+2026-10-09T21:50:08.895Z	Parloa	reachable
+2026-10-09T21:50:08.895Z	Intercom	reachable
+2026-10-09T21:50:08.895Z	Hume AI	reachable
+2026-10-09T21:50:08.895Z	ElevenLabs	reachable
+2026-10-09T21:50:08.895Z	Deepgram	reachable
+2026-10-09T21:50:08.895Z	Vapi	reachable
+2026-10-09T21:50:08.895Z	Bland AI	reachable
+2026-10-09T21:50:08.895Z	Airtable	reachable
+2026-10-09T21:50:08.895Z	Vercel	reachable
+2026-10-09T21:50:08.895Z	Temporal	slug_gone
+2026-10-09T21:50:08.895Z	Arize AI	reachable
+2026-10-09T21:50:08.895Z	RunPod	slug_gone
+2026-10-09T21:50:08.895Z	Weights & Biases (CoreWeave)	reachable
+2026-10-09T21:50:08.895Z	Glean	reachable
+2026-10-09T21:50:08.895Z	Ada	slug_gone
+2026-10-09T21:50:08.895Z	Sierra	reachable
+2026-10-09T21:50:08.895Z	Decagon	reachable
+2026-10-09T21:50:08.895Z	Wealthsimple	reachable
+2026-10-09T21:50:08.895Z	Lindy	slug_gone
+2026-10-09T21:50:08.895Z	1password	reachable
+2026-10-09T21:50:08.895Z	gumloop	reachable
+2026-10-09T21:50:08.895Z	Deepset AI	reachable
+2026-10-09T21:50:08.895Z	Speechmatics	reachable
+2026-10-09T21:50:08.895Z	n8n	reachable
+2026-10-09T21:50:08.895Z	Zapier	reachable
+2026-10-09T21:50:08.895Z	Boomi	reachable
+2026-10-09T21:50:08.895Z	Cohere	reachable
+2026-10-09T21:50:08.895Z	LangChain	reachable
+2026-10-09T21:50:08.895Z	Pinecone	reachable
+2026-10-09T21:50:08.895Z	Mistral AI	empty
+2026-10-09T21:50:08.895Z	Palantir	reachable
+2026-10-09T21:50:08.895Z	Later	reachable
+2026-10-09T21:50:08.895Z	Safari AI	reachable
+2026-10-09T21:50:08.895Z	Hootsuite	reachable
+2026-10-09T21:50:08.895Z	Klue	reachable
+2026-10-09T21:50:08.895Z	Glacis AI	reachable
+2026-10-09T21:50:08.895Z	Sanctuary AI	slug_gone
+2026-10-09T21:50:08.895Z	Semios	reachable
+2026-10-09T21:50:08.895Z	Factorial	slug_gone
+2026-10-09T21:50:08.895Z	Attio	reachable
+2026-10-09T21:50:08.895Z	Tinybird	slug_gone
+2026-10-09T21:50:08.895Z	Clarity AI	slug_gone
+2026-10-09T21:50:08.895Z	Travelperk	slug_gone
+2026-10-09T21:50:08.895Z	Aleph Alpha	reachable
+2026-10-09T21:50:08.895Z	DeepL	reachable
+2026-10-09T21:50:08.895Z	Black Forest Labs	slug_gone
+2026-10-09T21:50:08.895Z	Helsing	reachable
+2026-10-09T21:50:08.895Z	Celonis	reachable
+2026-10-09T21:50:08.895Z	Contentful	reachable
+2026-10-09T21:50:08.895Z	GetYourGuide	reachable
+2026-10-09T21:50:08.895Z	HelloFresh	reachable
+2026-10-09T21:50:08.895Z	N26	reachable
+2026-10-09T21:50:08.895Z	Trade Republic	reachable
+2026-10-09T21:50:08.895Z	SumUp	reachable
+2026-10-09T21:50:08.895Z	Qonto	reachable
+2026-10-09T21:50:08.895Z	Forto	slug_gone
+2026-10-09T21:50:08.895Z	Lakera	empty
+2026-10-09T21:50:08.895Z	Scandit	reachable
+2026-10-09T21:50:08.895Z	Cradle	reachable
+2026-10-09T21:50:08.895Z	Hugging Face	reachable
+2026-10-09T21:50:08.895Z	Photoroom	reachable
+2026-10-09T21:50:08.895Z	Pigment	reachable
+2026-10-09T21:50:08.895Z	Wayve	slug_gone
+2026-10-09T21:50:08.895Z	Isomorphic Labs	reachable
+2026-10-09T21:50:08.895Z	PhysicsX	reachable
+2026-10-09T21:50:08.895Z	Stability AI	reachable
+2026-10-09T21:50:08.895Z	Synthesia	reachable
+2026-10-09T21:50:08.895Z	Faculty	reachable
+2026-10-09T21:50:08.895Z	Causaly	reachable
+2026-10-09T21:50:08.895Z	Lovable	reachable
+2026-10-09T21:50:08.895Z	Legora	reachable
+2026-10-09T21:50:08.895Z	Spotify	reachable
+2026-10-09T21:50:08.895Z	Vinted	slug_gone
+2026-10-09T21:50:08.895Z	Corti	reachable
+2026-10-09T21:50:08.895Z	Pleo	reachable
+2026-10-09T21:50:08.895Z	Templafy	slug_gone
+2026-10-09T21:50:08.895Z	Amplemarket	reachable
+2026-10-09T21:50:08.895Z	Perplexity	reachable
+2026-10-09T21:50:08.895Z	Clay Labs	reachable
+2026-10-09T21:50:08.895Z	Runway	slug_gone
+2026-10-09T21:50:08.895Z	Hightouch	slug_gone
+2026-10-09T21:50:08.895Z	WorkOS	reachable
+2026-10-09T21:50:08.895Z	Supabase	reachable
+2026-10-09T21:50:08.895Z	Resend	reachable
+2026-10-09T21:50:08.895Z	Clerk	reachable
+2026-10-09T21:50:08.895Z	Inngest	reachable
+2026-10-09T21:50:08.895Z	Tailscale	reachable
+2026-10-09T21:50:08.895Z	PlanetScale	reachable
+2026-10-09T21:50:08.895Z	Everflow	reachable
+2026-10-09T21:50:08.895Z	SolidJobs IT	reachable

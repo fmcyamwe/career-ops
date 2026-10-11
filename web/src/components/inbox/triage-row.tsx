@@ -30,6 +30,7 @@ export function TriageRow({
   scored,
   selected,
   shortlisted,
+  hasReport, 
   onToggleSelect,
   onSave,
   onSkip,
@@ -40,6 +41,7 @@ export function TriageRow({
   scored?: RowScore;
   selected: boolean;
   shortlisted: boolean;
+  hasReport:boolean;
   onToggleSelect: () => void;
   onSave: () => void;
   onSkip: () => void;
@@ -115,6 +117,7 @@ export function TriageRow({
           >
             <X className="size-4" />
           </button>
+          <span className="max-sm:hidden">{hasReport ?  "🍎" : ""}</span>
         </div>
       )}
     </li>

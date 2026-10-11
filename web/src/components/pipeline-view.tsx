@@ -89,6 +89,24 @@ export function PipelineView({
     return out;
   }, [inbox]);
 
+  const hasReports = useMemo(() => {
+    const seen = new Set<string>();
+    const roles = new Set<string>();
+    const out: Application[] = [];
+    for (const j of applications) {
+      if (j.company && seen.has(j.company)) continue;
+      seen.add(j.company);
+      roles.add(j.role);
+      out.push(j);
+    }
+    let a = applications.filter((r) => seen.has(r.company)).length; 
+    //let b = inbox.filter((r) => seen.has(r.company))//.length; 
+
+   // console.log("muahaha_reports", seen, out , a , roles); //canonStatus(r.status).includes(t)
+    return out; //could also send seen or roles as simpler...toReview* 
+  }, [applications]);
+ 
+
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
     let rows = applications;
@@ -183,7 +201,7 @@ export function PipelineView({
       {tab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
+          <InboxTriage inbox={pendingInbox} reports={hasReports} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )

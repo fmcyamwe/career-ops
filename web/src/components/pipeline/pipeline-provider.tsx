@@ -39,7 +39,8 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
+  useEffect(() => { //too much ...pass in inbox to see if have changed?
+    console.log("refetching...", inbox.length)
     refetch();
   }, [refetch]);
 
