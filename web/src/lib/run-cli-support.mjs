@@ -365,6 +365,33 @@ export function parseGrokEvent(line) {
   return null;
 }
 
+function streamNodeAction(node) {
+  const EvTypes = ['UserPromptNode','FinalResultEvent', 'FinalEndNode', 'ToolCallPart','FunctionToolCallEvent','ThinkingPart', 'ToolReturnPart', 'RetryPromptPart']; //'PartEndEvent'
+
+  let etype = node.type || "";
+  let data = node.extra || node.data || "No data" ; 
+
+  const EType = EvTypes.find((t) => t == etype);
+  if (!EType) {logger.error("🤖 streamNodeAction ERROR?--undefined EvType", {content:  node}); return null;}
+  //prolly switch on the NodeType actually!! 
+  // then others are just if statements
+  // --todo**
+  switch (EType) { //status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
+    case 'UserPromptNode': return { type: "text", text: data, status : "Done" };
+    case 'FinalResultEvent': return { type: "text", text:data, status : "Done" };
+    //case 'FinalResultEvent': return { type: "status", label: 'tokens',  tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd ..toFix**
+    case 'FinalEndNode': return { status : "done", type: "text", text: data };
+    case 'ToolCallPart': return { status: 'tool', tool: etype, text: data };
+    case 'FunctionToolCallEvent': return { status: 'tool', tool: etype, text: data }; 
+    case 'ThinkingPart': return { type: "text", status: 'thinking...', text: 'just thinkin...' }; //data // bon should show nothin?...
+    case 'ToolReturnPart': return { status: 'tool', tool: etype, text: data };
+    case 'RetryPromptPart': return { status: 'tool', tool: etype, text: data }; 
+    default:
+      //return { text: evt.data }; //default or return null below?
+      logger.error("🤖 streamNodeAction DEFAULT?--OfType",node)
+  }
+}
+
 /**
  * Convert one Ollama event line into a ParsedEvent to be consumed by the frontend
  * The event is result of agent.iter() streaming graph nodes.
@@ -373,31 +400,32 @@ export function parseGrokEvent(line) {
  * @returns {ParsedEvent | null}
  */
 export function parseOllamaEvent(line) {
-  logger.info("🤖 parseOllamaEvent:: received", {content: line});
-  const OEvTypes = ['Result','Tokens', 'NodeType', 'Info']; //todo** export this prolly
+  const OEvTypes = ['Result','Tokens', 'NodeType', 'Info']; //todo** export this prolly?
+  //const EvTypes = ['UserPromptNode','FinalResultEvent', 'FinalEndNode', 'ToolCallPart','FunctionToolCallEvent','ThinkingPart','PartEndEvent'];
 
   let evt;
   try {
     evt = JSON.parse(line);
   } catch {
-    logger.error("🤖 processOllamaEvt >>ERROR", {msg: 'Json parse error',content: line})
+    logger.error("🤖 parseEvent >>ERROR", {msg: 'Json parse error',content: line.length})
     return null;
   }
 
   if (!evt || typeof evt !== "object") return null;
 
   //let OfType = evt.OfType || undefined
-  const OfType = OEvTypes.find((t) => t === evt.OfType);
-  if (!OfType) return null; //log?
+  const OfType = OEvTypes.find((t) => t == evt.OfType);
+  if (!OfType) {logger.error("🤖 parseEvent ERROR?--undefined OfType", {content:  line.slice(0, 100)}); return null;}
   //prolly switch on the NodeType actually!! 
   // then others are just if statements
   // --todo**
   switch (OfType) { //status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
-    case 'Result': return { text: evt.output, status : "Done" }; //toReview
-    case 'Tokens': return { text: 'done',  tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd ..toFix**
-    case 'NodeType': return { status: 'tool', tool: evt.type, text: evt.data }; //toFix**
+    case 'Result': return { type: "text", text: evt.output, status : "Done" }; //toReview
+    case 'Tokens': return { type: "status", label: 'tokens',  tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd ..toFix**
+    case 'NodeType': return streamNodeAction(evt);
     default:
       //return { text: evt.data }; //default or return null below?
+      logger.error("🤖 parseEvent DEFAULT?--OfType",line)
   }
 
   return null;

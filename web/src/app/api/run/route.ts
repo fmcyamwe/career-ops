@@ -17,7 +17,7 @@ import logger from "@/lib/logger.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
+export const maxDuration = 8000; //was 800...need this? a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 // The web ORCHESTRATES the real career-ops engine — it does NOT reimplement it.
 // kind "evaluate" runs the REAL modes/oferta.md and persists the canonical
@@ -26,6 +26,37 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // so a web evaluation is byte-identical to a CLI one (single source of truth, no
 // drift). kind "research" stays read-only. Streams progress as NDJSON events.
 
+
+function checkStuff(kind:string, input:string, cliId:string) {
+  const resolved = resolveCli(cliId);
+  if (!resolved) {
+    logger.error(`WOAH WOAH ERROR No CLI found for ${cliId} !!`, {input: input, in: careerOpsRoot()}); //toMonitor changes
+    return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "generate-cover-letter.mjs" };
+  const required = needsScript[kind];
+  if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
+    return new Response(
+      JSON.stringify({
+        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  
+  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+    return new Response(
+      JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  return {...resolved}; 
+}
 
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string };
@@ -38,16 +69,28 @@ export async function POST(req: Request) {
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
+
+  const anyErr = checkStuff(kind, input, cliId);
+  //if (typeof anyErr == Response)
+  //const testu = new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  //logger.error(`WOAH checkStuff`,{ofT: (anyErr instanceof Response), andT: (testu instanceof Response), data: {...anyErr} })
+
+  if(anyErr instanceof Response){
+    return anyErr; //bon...error
+  }
+
+  const { spec, binPath } = anyErr;
+
+  /*
   const resolved = resolveCli(cliId);
   if (!resolved) {
-    logger.error(`WOAH WOAH ERROR No CLI found for ${cliId} !!`, {input: input, in: careerOpsRoot()}); //toMonitor changes
+    logger.error(`WOAH WOAH ERROR No CLI found for ${cliId} !!`, {input: input, in: careerOpsRoot()});
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
   const { spec, binPath } = resolved;
-  //logger.info(`resolvedCli ${cliId} >>`, {...spec, hasPar: typeof spec.parseEvent}); //just to see
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
@@ -70,6 +113,7 @@ export async function POST(req: Request) {
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
+  */
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -109,9 +153,10 @@ export async function POST(req: Request) {
   const opts = {kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths };//bof lang will default
   let sysPrompt = ''
   let instructions = ''
+
   if(isOllama){
     sysPrompt = basePrompt(); //oldie but goes over the context smh //buildSysPrompt(kind, "apiRun");
-    buildSysPrompt(kind, "apiRun"); //just to see...
+    //buildSysPrompt(kind, "apiRun"); //just to see...redundant tho smh
     instructions = apiRunSesshInstructions(opts);
   }
 
@@ -139,8 +184,8 @@ export async function POST(req: Request) {
       // '-v' instead for uv? --meh no need with flush flag in print 
       'agent.py',
       '--question',
-      `${input}`,
-      "--prompt",
+      `${input}`, //kind === "evaluate" ? `Follow the instructions for this Posting URL: ${input}` : ${input}
+      "--instructions",
       instructions,
       "--sys_prompt",
       prompt,
@@ -176,14 +221,14 @@ export async function POST(req: Request) {
   let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}
   logger.info("🤖 api-Run::POST", {...lo}) 
 
-  logger.toFile(filePath, `\n Start: ${instructions} \n with context: \n ${prompt.length}`)
+  logger.toFile(filePath, `\n Start: ${instructions} \n\n with context: \n ${prompt}`)
   
 
   const child = isOllama ? 
   //spawn(`curl`, args) //huh when adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops/ollama-test.mjs
   //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
   spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] })
-  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //should use this? as >> stdin must reach EOF or the CLI waits on piped input that never comes...
+  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //this? as >> stdin must reach EOF or the CLI waits on piped input that never comes...
   : 
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
@@ -230,7 +275,7 @@ export async function POST(req: Request) {
       let lastCostUsd: number | null = null;
 
       // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 840_000 : 720_000; //14 && 12 minutes //meh //285_000;
+      const killMs = kind === "pdf" ? 840_000 : 840_000; //14 && 12 minutes(720_000) //meh //285_000;
       
       // Set by the killer so the close handler can tell "we timed it out" apart
       // from "the CLI exited on its own" — different failures, different message.
@@ -239,7 +284,7 @@ export async function POST(req: Request) {
         killedByTimeout = true;
         try {
           logger.warn("🤖 api-Run::TIMEOUT!!!", {closed: closed, as: cliId, input: input, buffer: buf, emitted: emittedText})
-          child.kill("SIGTERM"); //bon necessary
+          child.kill("SIGTERM");
         } catch { /* ignore */ }
       }, killMs);
 
@@ -315,7 +360,7 @@ export async function POST(req: Request) {
         return written.ok;
       };
 
-      const processParsedLine = (line: string) => { //prolly should use this instead of 'streamNodeAction' when have parseOllamaEvent for parseEvent
+      const processParsedLine = (line: string) => {
         if (!spec.parseEvent) return;
         const ev = spec.parseEvent(line);
         if (ev?.text) {
@@ -351,53 +396,84 @@ export async function POST(req: Request) {
           };
         }
       }
+      
+      //for info..and results?
+      const streamNodeInfo= (line: string) => {
+        let oContent;
+        try {
+          oContent = JSON.parse(line);
+          let OfType = oContent.OfType || undefined
+          switch (OfType) { //smh falls through without return on a case smh
+            case undefined: return logger.error("🤖 streamNodeInfo ERROR?--undefined OfType", {content:  line.slice(0, 200)}); //throw new Error("ERROR YO, no type!!");
+            case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
+            case 'Tokens': return saveTokens(line);
+            case 'Info': return logger.toFile(filePath, `\n ${line} \n`); //bon save this to file
+            //case 'NodeType': return streamNodeAction(oContent);
+            //todo** add for case funct tool error?
+            default:
+              logger.error("🤖 streamNodeInfo >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})
+          }
+        } catch {
+          console.error(`🤖   streamNodeInfo >>Ollama...ERROR json!! \n ${line} \n`);
+        }
+      }
 
-      const streamNodeAction = (node: any) => { //todo** move this into run-cli-support.mjs
+      /*const streamNodeAction = (node: any) => { //todo** move this into run-cli-support.mjs
         let type = node.type || "";
         let data = node.data || "No data" ; 
             //skip for 'UserPromptNode'  && 'ModelRequestNode' && 'CallToolsNode' ? 
             //FunctionToolResultEvent as status? >> use ToolReturnPart instead? ..prolly both
-        if (type == 'UserPromptNode' || type == 'FinalResultEvent' || type == 'FinalEndNode' ){
+        if (type == 'UserPromptNode' || type == 'FinalResultEvent' || type == 'FinalEndNode' ||  type == 'PartEndEvent' ){
           logger.info(`🤖 ${type}`, node);
           return
         }
         
         sendAgentText(`${type} : ${data}`)
         //use if and build object...
-        let toSend = type == 'ToolCallPart' || type =='FunctionToolCallEvent' ? 'tool' : type == 'UserPromptNode' ? 'status' : 'text'
+        let toSend = type == 'ToolCallPart' ? 'tool' : type == 'FunctionToolCallEvent' ? 'status' : 'text' //|| type == 'PartEndEvent'
         send({ type: toSend, label: `${toSend}`, name: `${data}` });
         emittedText = true;
-      }
+      }*/
       
-      const processOllamaEvt = (line: string) => {
+      const parseOllamaEvt = (line: string) => {
         //if (!spec.parseEvent) return;
         //const ev = spec.parseEvent(line);
         ////status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
+        if(spec.parseEvent){ 
+          const ev = spec.parseEvent(line);
+          if(ev){
+            console.error(ev);
+            return send({...ev}); //toReview below...
+            //also add emittedText = true;
+          }else{
+            logger.error("🤖 ERROR?--parseEvent is null eh...", {content: line.length}); 
+          }
+        };
 
         let oContent;
         try {
           oContent = JSON.parse(line);
           let OfType = oContent.OfType || undefined
           switch (OfType) { //smh falls through without return on a case smh
-            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: oContent}); //throw new Error("ERROR YO, no type!!");
+            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content:  line.slice(0, 200)}); //throw new Error("ERROR YO, no type!!");
             case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
             case 'Tokens': return saveTokens(line);
-            case 'Info': return logger.toFile(filePath, `\n ${line} \n`); //bon save this to file
-            case 'NodeType': return streamNodeAction(oContent);
+            case 'Info': return logger.toFile(filePath, `\n ${line} \n`);
+           //case 'NodeType': return streamNodeAction(oContent); //no need as should be handled above..
             default:
-              logger.error("🤖 processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})
+              logger.error("🤖 parseOllamaEvt >>ERROR?--No OfType", { closed: closed, OfType: OfType || cliId, content: line.slice(0, 200)})
           }
 
         } catch {
-          console.error(`🤖   processOllamaEvt >>Ollama...ERROR json!! \n ${line} \n`);
+          console.error(`🤖   parseOllamaEvt >>Ollama...ERROR json!! \n ${line} \n`);
         }
       }
       
       child.stdout.on("data", (d: Buffer) => { //chunk: string
         if (closed) return;
         if (isOllama){
-          logger.info("🤖  stream::apiRun::data", { size: d.length})
-          return processOllamaEvt(d.toString('utf-8')); //try with toString('utf8') ?
+          logger.info("🤖  stream::apiRun::onData", { size: d.length})
+          return streamNodeInfo(d.toString('utf-8'));
         }
 
         if (!isClaude) {
@@ -411,10 +487,9 @@ export async function POST(req: Request) {
         while ((nl = buf.indexOf("\n")) !== -1) {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
-          if (!line) continue;
-          //whole try below would be replaced by below
-          ////if (line) processParsedLine(line);
-          try {
+          //if (!line) continue;
+          if (line) processParsedLine(line);
+          /* try {
             const ev = JSON.parse(line);
             if (ev.type === "stream_event") {
               const e = ev.event;
@@ -435,20 +510,20 @@ export async function POST(req: Request) {
               if (typeof ev.total_cost_usd === "number") lastCostUsd = ev.total_cost_usd;
             }
           } catch {
-            /* partial line */
-          }
+            //partial line 
+          }*/
         }
       });
 
       child.stderr.on("data", (d: Buffer) => { //chunk: string
-        const s = d.toString();
-        logger.info("🤖  stream::apiRun::stderr", { size: s.length})
+        const s = d.toString('utf8');
+        //logger.info("🤖  stream::apiRun::stderr", { size: s.length})
         // Widened: auth/login/quota failures are the most common real error and
         // the old narrow regex missed them (silent false "success").
         //fs.writeFileSync(filePath,`\n ${s} \n`, {flag: 'a',encoding: 'utf8'});
         logger.toFile(filePath, `\n ${s} \n`)
         if (isOllama){
-          return processOllamaEvt(s); //try with toString('utf8') ?
+          return parseOllamaEvt(s); 
         }
         
         if (/error|denied|fatal|not found|unauthorized|forbidden|auth|credential|api[ -]?key|quota|rate limit|not authenticated/i.test(s)) { // |login|
@@ -459,47 +534,6 @@ export async function POST(req: Request) {
           logger.error("🤖  onStderr", { size: s.length, message: 'some matching errs', type: nodeT}) //on:'stderr',
         }
       });
-      
-      // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
-      // injected, unit-tested) so the render-then-mark orchestration isn't
-      // buried untested inside this transport-layer closure. Runs generate-
-      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes — no agent
-      // CLI or its sandbox involved — so a browser launch never depends on an
-      // interactive approval nobody is present to grant in a headless/web-
-      // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
-      // successful render, not optimistically — same honesty-gate discipline as
-      // the evaluate path below.
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
-        send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf is designed to resolve, never throw — but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it — and the write-token — open until process shutdown.
-        try {
-          logger.info("🔗 rendering PDF", {kind: kind, report: input, paths: paths, format: format})
-          const result = await renderAndMarkPdf({
-            spawnFn: spawn,
-            execPath: process.execPath,
-            root: careerOpsRoot(),
-            pdfPaths: paths,
-            format,
-            reportNum: input,
-          });
-          if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
-            return;
-          }
-          // Non-fatal issues (a defaulted page format, a tracker row not marked) still
-          // surface here rather than only in a server log nobody sees.
-          sendWarnings(result.warnings);
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-        } catch (e) {
-          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
-        } finally {
-          close();
-        }
-      };
 
       child.on("error", (e) => { 
         send({ type: "error", msg: e.message }); 
@@ -601,6 +635,47 @@ export async function POST(req: Request) {
 
         close();
       });
+            
+      // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
+      // injected, unit-tested) so the render-then-mark orchestration isn't
+      // buried untested inside this transport-layer closure. Runs generate-
+      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes — no agent
+      // CLI or its sandbox involved — so a browser launch never depends on an
+      // interactive approval nobody is present to grant in a headless/web-
+      // triggered run (#2172). The tracker is marked ✅ only after a CONFIRMED
+      // successful render, not optimistically — same honesty-gate discipline as
+      // the evaluate path below.
+      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
+        send({ type: "status", label: "Rendering PDF…" });
+        // renderAndMarkPdf is designed to resolve, never throw — but this is
+        // the one place nothing else awaits or catches this promise (cancel()
+        // only attaches a .finally for the write-token release), so an
+        // unexpected exception here must still close the stream instead of
+        // leaving it — and the write-token — open until process shutdown.
+        try {
+          logger.info("🔗 rendering PDF", {kind: kind, report: input, paths: paths, format: format})
+          const result = await renderAndMarkPdf({
+            spawnFn: spawn,
+            execPath: process.execPath,
+            root: careerOpsRoot(),
+            pdfPaths: paths,
+            format,
+            reportNum: input,
+          });
+          if (result.kind === "render-failed") {
+            send({ type: "error", msg: result.error.slice(0, 200) });
+            return;
+          }
+          // Non-fatal issues (a defaulted page format, a tracker row not marked) still
+          // surface here rather than only in a server log nobody sees.
+          sendWarnings(result.warnings);
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+        } catch (e) {
+          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+        } finally {
+          close();
+        }
+      };
     },
     cancel() {
       closed = true;

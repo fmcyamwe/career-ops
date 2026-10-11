@@ -87,7 +87,7 @@ export async function POST(req: Request) {
         'agent.py',
         '--question',
         `${message}`,
-        '--prompt',
+        '--instructions',
         `${prompt}`,
         '--fromP',
         'api-assistant',
@@ -97,8 +97,8 @@ export async function POST(req: Request) {
     spec.args(prompt);
 
   const filePath = path.join(careerOpsRoot(), 'api-assistant.log'); 
-  //console.log(`🤖  assistant::POST...args...${careerOpsRoot()}\n\n`, args);
-  //logger.info("🤖 api-assistant", {root: careerOpsRoot(), args: args})
+  //console.log(`🍎  assistant::POST...args...${careerOpsRoot()}\n\n`, args);
+  //logger.info("🍎 api-assistant", {root: careerOpsRoot(), args: args})
 
   logger.toFile(filePath, `\n Start: ${careerOpsRoot()} \n with args: \n ${args}`)
 
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
   // yeeeyuh works and with the 'stdio' options output captured via console.log! 
   // also adding cwd does change working dir and script need to be in parent dir or borks >> /Users/florentcyamweshi/Downloads/career-ops
   spawn('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //oldie that worked >> cwd: path.join(careerOpsRoot(), "seeds")
-  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //huh works //toSee with stdout changes to pipe as dont honor stdio params..., 
+  //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] }) //huh works
   :
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
@@ -153,7 +153,7 @@ export async function POST(req: Request) {
         }
       };
       const safeEnqueue = (s: string): boolean => {
-        //console.log(`🤖  stream::apiAssistant::safeEnqueue....${s}\n ${closed}`);
+        //console.log(`🍎  stream::apiAssistant::safeEnqueue....${s}\n ${closed}`);
         if (closed || !s) return false;
         try {
           controller.enqueue(encoder.encode(s));
@@ -172,30 +172,35 @@ export async function POST(req: Request) {
         if (safeEnqueue(`${toSend} : ${data}`)) emitted = true;
       }
 
+      const sendNodeOutput = (node: any) => {
+        let toSend = `${node.output ?? 'Nothing?'}`
+        if (safeEnqueue(`${toSend} \n`)) emitted = true; //: ${toSend}
+      }
+
       const processOllamaEvt = (chunk: string) => {
         let oContent;
         try { 
           oContent = JSON.parse(chunk);
           let OfType = oContent.OfType || undefined
           switch (OfType) { //smh falls through without return on a case smh
-            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content: chunk}); //throw new Error("ERROR YO, no type!!");
-            case 'Result': return safeEnqueue(`${oContent.output ?? 'Nothing?'}` );
+            case undefined: return logger.error("🍎 ERROR?--undefined OfType", {content: chunk});
+            case 'Result': return sendNodeOutput(oContent);//safeEnqueue(`${oContent.output ?? 'Nothing?'}` );
             case 'Tokens': return logger.info("Tokens", {content: chunk}); //saveTokens(line);
             case 'Info': return logger.toFile(filePath, `\n ${chunk} \n`); //bon save this to file
             case 'NodeType': return streamNodeAction(oContent);
             default:
-              logger.error("🤖 processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:chunk})
+              logger.error("🍎  processOllamaEvt >>ERROR?--No OfType", { closed: closed, cli: cliId, content:chunk})
           }
         } catch {
           //handle error?!? retry?
-          //console.log(`🤖  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
-          logger.error("🤖 stream::apiAssistant::ERROR json", {on: 'OnEmit Ollama.', data: chunk})
+          //console.log(`🍎  stream::onEmit>>Ollama...ERROR json!! \n ${s} \n`);
+          logger.error("🍎  stream::apiAssistant::ERROR json", {on: 'OnEmit Ollama.', data: chunk})
         }
       };
 
       const emit = (s: string) => {
-        //console.log(`🤖  stream::apiAssistant::onEmit....\n ${s}`);
-        //logger.info("🤖 apiAssistant::onEmit", {data: s})
+        //console.log(`🍎  stream::apiAssistant::onEmit....\n ${s}`);
+        //logger.info("🍎 apiAssistant::onEmit", {data: s})
         if(isOllama){
          
           return processOllamaEvt(s);
@@ -205,12 +210,12 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (d: Buffer) => { //chunk: string
-        //console.log(`🤖 stream::apiAssistant::onData....${d.byteLength} \n`);
-        logger.info("🤖 stream::apiAssistant", {on: 'stdout:onData', size: d.byteLength})
+        //console.log(`🍎 stream::apiAssistant::onData....${d.byteLength} \n`);
+        logger.info("🍎 stream::apiAssistant", {on: 'stdout:onData', size: d.length})
         if (closed) return;
         if (!isClaude) {
           //here should try and proper parsing >> toReview**
-          emit(d.toString());
+          emit(d.toString('utf-8'));
           return;
         }
 
@@ -235,29 +240,29 @@ export async function POST(req: Request) {
 
       child.stderr.on("data", (d: Buffer) => { //chunk: string
         const s = d.toString();
-        //console.log(`🤖  stream::apiAssistant::onData Errr....${s} \n`); 
+        //console.log(`🍎  stream::apiAssistant::onData Errr....${s} \n`); 
         //huh thinking output?--from console.error--any text with error gets passed to parent--before process.exit(1)
         //fs.writeFileSync(filePath, s, {flag: 'a',encoding: 'utf8'}); //yeeeyuh 'a' flag to append!!
         logger.toFile(filePath, `\n ${s} \n`)
-        logger.info("apiAssistant::stderr", {size: d.byteLength}) //on:'stderr', 
+        logger.info("apiAssistant::stderr", {size: d.length, same: s.length})
 
         if (/error|not found|denied|fatal/i.test(s)) {
           //safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`); //bon dont just send to frontend willy nilly!
           let nodeT = s.slice(0, 50);
-          //console.log(`🤖  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
-          logger.error("🤖  stream::apiAssistant:::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) 
+          //console.log(`🍎  stream::apiAssistant::onData Errr...SHIET ERROR? \n\n`)
+          logger.error("🍎  stream::apiAssistant:::stderr", { size: d.byteLength, message: 'SHIET ERROR?', type: nodeT}) 
         }
         if (/input_tokens|output_tokens/i.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
           let usage;
-          try{ usage = JSON.parse(s) } catch { console.error(`🤖  stream::apiAssistant::onData Errr...ERROR json!! \n ${s} \n`);};
+          try{ usage = JSON.parse(s) } catch { console.error(`🍎  stream::apiAssistant::onData Errr...ERROR json!! \n ${s} \n`);};
           //lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
           //lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
         }
       });
 
       child.on("error", (e) => {
-        console.log(`🤖  stream::apiAssistant::onError....${e.message} \n`); 
+        console.log(`🍎  stream::apiAssistant::onError....${e.message} \n`); 
         safeEnqueue(`\n[error launching ${spec.name}: ${e.message}]`);
         safeClose();
       });

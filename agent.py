@@ -59,6 +59,7 @@ from pydantic_ai_harness import Shell, FileSystem
 from pydantic_ai_harness.subagents import SubAgent, SubAgents
 #from pydantic_ai_harness.context import RepoContext
 from seeds.tool_output import Fruit, Vehicle, WriteFileArgss #toSee >> umm think borks script importing WriteFileArgs due to missing pydantic lib? or is it using? --guess ok when imported...
+from seeds.custom_tools import custom_tools
 import asyncio
 
 
@@ -89,10 +90,10 @@ model = OllamaModel(
     settings={'temperature': 0.1, 'seed': seed, 'top_k':40, 'tool_choice': 'auto'}
 )
 
-subAgentModel = OllamaModel(
-    'gemma4', 
+subAgent_model = OllamaModel(
+    'llama3.2:3b', #'gemma4',
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'temperature': 0.1, 'seed': seed, 'top_k':40, 'tool_choice': 'auto'}
+    settings={'tool_choice': 'auto'} #'temperature': 0.1, 'seed': seed, 'top_k':40, 
 )
 # seed: int 
 # thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`. >> prolly no need as it's a thinking model...,'thinking':'high' >>toSee when reduced to minimal? smh slower? , 'thinking':'minimal'
@@ -117,24 +118,29 @@ subAgentModel = OllamaModel(
 #        }} ## 8192-16384 for long documents >>NOPE abruptly stop when set...
 ##umm could try and set different temperature, top_k || top_p per run as well? toTry**
 
-reader = Agent(
-  subAgentModel, #'ollama:gemma4',
-  name='reader', #'researcher', 
-  description='Reads files and returns their content', #'Researches a topic and reports findings'
-  #capabilities=[CustomFileSystem()] #workd..below as well!
-  #toolsets=[custom_tools]
+
+reader_agent = Agent(
+    subAgent_model,
+    name='reader_agent',
+    instructions='Given a file path, read and return the file contents',
+    description='Reads a given file path and returns the file contents',
+    output_type = str,
+    toolsets=[custom_tools]
   )
 
-writer = Agent(
-  subAgentModel, # 'ollama:gemma4',
-  name='writer', 
-  description='Writes given content to a file',#'Turns notes into polished prose'
-  #capabilities=[CustomFileSystem()] #workd..below too!
- #toolsets=[custom_tools]
+#'Turns notes into polished prose'
+writer_agent = Agent(
+    subAgent_model, # 'ollama:gemma4',
+    name='writer_agent',
+    instructions='Write given content to a given file path',
+    description='Writes given content to a given file path',
+    output_type = str,
+    toolsets=[custom_tools]
   ) 
 
+
 def write_to_file(indat, filename="output.txt"):
-  with open(filename, "w",encoding='utf-8') as file: # encoding='utf-8' >> encoding makes diff? bon removed for now
+  with open(filename, "w") as file: # encoding='utf-8' >> encoding makes diff? bon removed for now
     try:
       written = file.write(indat)
       return written
@@ -164,7 +170,6 @@ def read_from_file(filePath):
 ##THo...can forgo them and set in Agent arguments?(for Tools!)
 
 
-
 def validate_path(ctx: RunContext[Any], path: str, content: str) -> None:
   """Validate that a path is provided"""
   if not path.strip():
@@ -175,8 +180,10 @@ def return_json(data) -> str:
 
 
 #assistant agent --prolly no need for sys_prompt param? instructions prolly ok?
-#umm should still pass in sys prompt with all those files context?
-def create_assistant_agent() -> Agent:
+#umm should still pass in sys prompt?
+##toSee when use instructions?
+##--also removed the tool functions...use toolsets=[custom_tools], ? 
+def create_assistant_agent(instructions) -> Agent:
   # 1. Define dependencies if needed (optional)
   # class MyDeps: ...
   
@@ -189,7 +196,7 @@ def create_assistant_agent() -> Agent:
   assistant = Agent(
     model,
     #deps_type=str,
-    instructions="Use the registered tool functions",
+    instructions=instructions,
     retries={'tools': 3, 'output': 1},
     capabilities=[
       #SubAgents(include_self=True), #umm nah
@@ -209,7 +216,7 @@ def create_assistant_agent() -> Agent:
     ])
 
   # 3. Register tools using decorators
-  @assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
+  #@assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
   async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
     if not args.content.strip():
       print(f'\nassistant_write_file:, {args.path} Error: no content? {args.content}',flush=True)
@@ -233,7 +240,7 @@ def create_assistant_agent() -> Agent:
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
 
 
-  @assistant.tool(name="read_file", description='Reads files and returns their content')
+  #@assistant.tool(name="read_file", description='Reads files and returns their content')
   async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
@@ -249,7 +256,7 @@ def create_assistant_agent() -> Agent:
 def create_run_agent(sys_prompt) -> Agent:
   # 1. Define dependencies if needed (optional)
   # class MyDeps: ...
-  
+
   # 2. Instantiate the agent
   agent = Agent(
     model,
@@ -257,10 +264,8 @@ def create_run_agent(sys_prompt) -> Agent:
     system_prompt=sys_prompt,
     #instructions="Use the registered function tools. DO NOT run command",
     retries={'tools': 3, 'output': 1},
+    toolsets=[custom_tools],
     capabilities=[
-      #SubAgents(include_self=True, inherit_tools=True), #naah
-      #SubAgents(agents=[SubAgent(reader), SubAgent(writer)]),
-      SubAgents(agents=[SubAgent(reader), SubAgent(writer)], inherit_tools=True), #inherit_tools gon be deprecated tho...
       #FileSystem(root_dir='.'),
       #refunds
       WebSearch(local='duckduckgo'),
@@ -271,17 +276,20 @@ def create_run_agent(sys_prompt) -> Agent:
       #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
       #  filenames=('AGENTS.md'), #'CLAUDE.md',
       #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
-      #Thinking(effort='high')
+      #Thinking(effort='high'),
+      #SubAgents(include_self=True, inherit_tools=True), #naah
+      #SubAgents(agents=[SubAgent(reader_agent), SubAgent(writer_agent)]) #inherit_tools gon be deprecated tho smh.. , inherit_tools=True...
     ])
 
-  @agent.tool_plain
-  def write_file(content: str, path: str) -> str: #toSee if better than below 'write_file' smh without ctx --also try with WriteFileArgs still?
+  # (args_validator=validate_path) >>seem to make it slower?
+  #@agent.tool_plain
+  async def write_file(content: str, path: str) -> str: #toSee if better than below 'write_file' smh without ctx --also try with WriteFileArgs still?
     real_path = os.path.join(os.getcwd(),path)
     print(f'\nagent_write_to_file: {path},{real_path} >> {len(content)} ',flush=True)
     try:
       succ = write_to_file(content,real_path)
       sys.stderr.write(f'\nagent_write_to_file:,{succ} <> \n {path},{real_path} >> {len(content)}')
-      return f"Successfully wrote {len(content)} characters to {real_path}"
+      return f"Successfully wrote {len(content)} == {succ} characters to {real_path}"
     except PermissionError:
       # Terminal — model should adapt, not retry the same call
       raise ToolFailed(f"Permission denied writing to {real_path}. Try a different path.")
@@ -289,7 +297,23 @@ def create_run_agent(sys_prompt) -> Agent:
       # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
 
-  @agent.tool #(name="read_file", description='Reads files and returns their content')
+  #@agent.tool_plain
+  async def another_write_file(content: str, path: str) -> str:
+    real_path = os.path.join(os.getcwd(),path)
+    print(f'\nanother_write_file: {path},{real_path} >> {len(content)} ',flush=True)
+    try:
+      #succ = write_to_file(content,real_path)
+      succ = writer_agent.run_sync(content, path) #umm? or need to pass in as deps?
+      sys.stderr.write(f'\nagent_write_to_file:,{succ} <> \n {path},{real_path} >> {len(content)}')
+      return f"Successfully wrote {len(content)} == {succ} characters to {real_path}"
+    except PermissionError:
+      # Terminal — model should adapt, not retry the same call
+      raise ToolFailed(f"Permission denied writing to {real_path}. Try a different path.")
+    except OSError as e:
+      # Transient — model should retry (e.g. file lock)
+      raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
+
+  #@agent.tool #(name="read_file", description='Reads files and returns their content')
   async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
@@ -299,15 +323,15 @@ def create_run_agent(sys_prompt) -> Agent:
     #sys.stderr.write(f'\nagent_read_file:, {fpath}, {Path.cwd()}, {real_path}') # \n\n {conte} 
     return conte
 
-  @agent.tool #(name="append_to_file", description='Append given content to an existing file')
+  #@agent.tool #(name="append_to_file", description='Append given content to an existing file')
   def append_to_file(ctx: RunContext[Any], args: WriteFileArgs) -> str: #path: str, content_chunk: str
     """Append a chunk of text to a specific file path.""" 
     real_path = os.path.join(os.getcwd(),args.path)
     with open(real_path, "a") as file:
-        file.write(args.content) #content_chunk
+        file.write(args.content)
     return f"Successfully appended {len(args.content)} to {real_path}"
 
-  @agent.tool_plain #(name="file_exists", description='Checks that a file exist at the given path')
+  #@agent.tool_plain #(name="file_exists", description='Checks that a file exist at the given path')
   def file_exists(fpath: str) -> bool:  #ctx: RunContext[Any], 
     """Checks that a file exist at the given path.""" 
     real_path = os.path.join(os.getcwd(),fpath)
@@ -321,9 +345,13 @@ def create_run_agent(sys_prompt) -> Agent:
   ##tosee below >>meh...prolly no need as gets instructions anyway?
   # --umm should tho to keep model on track? --yuup toSee if invoked on all tool calls...
   # oldie >> but no need ...Use the registered read_file, write_file and append_to_file tool functions.
-  @agent.instructions
+  #@agent.instructions
   def instructions() -> str:  
-    return f'Do not use nor invent placeholders to be added in reports. Always generate the content that needs persistence as instructed'
+    return f'Do not use nor invent placeholders to be added in reports. Always generate the content that needs persistence as instructed.'
+
+  #@agent.instructions
+  def instructions() -> str:  
+    return f'Delegate single task per sub agent.'
     
   
   #@agent.system_prompt  #toTry?
@@ -332,36 +360,6 @@ def create_run_agent(sys_prompt) -> Agent:
 
   # 4. Return the configured agent
   return agent
-
-  '''
-  # 3. Register tools using decorators
-  # (args_validator=validate_path) >>seem to make it slower?
-  @agent.tool #(name="write_file", description='Write argument contents to a file') #, retries=2
-  async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
-    try: 
-      if not args.content.strip():
-        sys.stderr.write(f'\nagent_write_file:, {args.path} Error: no content? {args.content}')
-        return f"Error: Cannot write empty file to {args.path}"
-    except AttributeError as e:
-      raise ModelRetry(f"Transient agent_write_file error without proper attributes {args}: {e}. Retry with proper formatted arguments in a moment.")
-
-    real_path = os.path.join(os.getcwd(),args.path)
-    #print(f'\ncustom_write_file:, {args.path},{real_path}',flush=True) #, os.path.dirname(__file__))
-    if 'forbidden' in args.content.lower():
-      sys.stderr.write(f'\nagent_write_file:, {args.path} Error: forbidden in content? \n {args.content}')
-      raise ValueError("Content contains forbidden words")  #handle here...todo**
-    
-    try:
-      succ = write_to_file(args.content,real_path)
-      sys.stderr.write(f'\nagent_write_file:,{succ} <> \n {args.path},{real_path} >> {len(args.content)}')
-      return f"Successfully wrote {len(args.content)} characters to {real_path}"
-    except PermissionError:
-      # Terminal — model should adapt, not retry the same call
-      raise ToolFailed(f"Permission denied writing to {real_path}. Try a different path.")
-    except OSError as e:
-      # Transient — model should retry (e.g. file lock)
-      raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
-  '''
 
 '''
 ## for when need subagents? wonder if ok to declare them here?
@@ -410,8 +408,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
     if isinstance(event, FinalResultEvent):
       toSend = {'OfType': 'NodeType','type':'FinalResultEvent','data':f'({event.tool_name})' }
       sys.stderr.write(f'{return_json(toSend)}')
-      return #just to not go below....
-    
+      return #just to not go below....   
     if isinstance(event, PartStartEvent):
       nodes.append(f'[Request] Starting part {event.index}: {event!r} \n')
       if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
@@ -432,38 +429,44 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
       #  )
     #elif isinstance(event, ToolReturnPart): #prolly cant happen? nope
     #  nodes.append(f'[WOAH] ToolReturnPart? {event.tool_name} :: {event.part.part_kind} >> {event.part.args!r}')
-    elif isinstance(event.part, ToolReturnPart): 
-      nodes.append(
-        f'[ToolReturnPart] From {event.part.tool_name} with contents? => {event.part.has_content()}'
-      )
-      toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': daType, 'data':f'{event.part.tool_name} with  contents? => {event.part.has_content()}' }
-      sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
     elif isinstance(event,PartEndEvent): # ModelResponsePart = TextPart | ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart | NativeToolSearchCallPart | NativeToolCallPart | NativeToolSearchReturnPart | NativeToolReturnPart | ThinkingPart | CompactionPart | FilePart | SpeechPart
-      nodes.append(f'[WOAH] PartEndEvent? {event!r}')
-      toSend = {'OfType': 'NodeType','type':'PartEndEvent','from?': daType, 'data':f'{event!r}', 'extra': f'{event.part.part_kind} >> {event.next_part_kind if event.next_part_kind is not None else '' }'}
-      sys.stderr.write(f'{return_json(toSend)}')
+      #nodes.append(f'[WOAH] PartEndEvent? {event!r}')
+      #toSend = {'OfType': 'NodeType','type':'PartEndEvent','from?': daType, 'data':f'{event!r}'} #, 'extra': f'{event.part.part_kind} >> {event.next_part_kind if event.next_part_kind is not None else '' }
+      #sys.stderr.write(f'{return_json(toSend)}')
       if isinstance(event.part, ThinkingPart): 
         nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
-        toSend = {'OfType': 'NodeType','type':'ThinkingPart','from?': daType, 'data':f'{event!r}' }
+        toSend = {'OfType': 'NodeType','type':'ThinkingPart','fromy': daType, 'data':f'{event!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
-    elif isinstance(event.part, ThinkingPart): #?!? happens at end of all the multiple ThinkingPartDelta
-      nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
-      toSend = {'OfType': 'NodeType','type':'ThinkingPart','from': daType, 'data':f'{event!r}' }
+      elif isinstance(event.part,ToolCallPart):
+        nodes.append(f'[ToolCallPart] >> \n {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data':f'{event.part!r}' }
+        sys.stderr.write(f'{return_json(toSend)}')
+      else:
+        nodes.append(f'[PartEndEvent..huh unknown?] >> \n {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'Unknown?','frum': daType, 'data':f'{event!r}' }
+        sys.stderr.write(f'{return_json(toSend)}')
+    elif isinstance(event.part, ThinkingPart): #?!? happens at end of all the multiple ThinkingPartDelta...should be caught by above tho..
+      nodes.append(f'[ThinkingPart..huh] >> \n {event.part.content!r}')
+      toSend = {'OfType': 'NodeType','type':'ThinkingPart','from?': daType, 'data':f'{event!r}' }
       sys.stderr.write(f'{return_json(toSend)}')
-
     elif isinstance(event,FunctionToolCallEvent):
       nodes.append(
         f'[FunctionToolCallEvent] Part  Args => {event!r}'
       )
-      toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data':f'{event!r}' }
+      toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','frooom': daType, 'data':f'{event!r}' }
       #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}') #, flush=True)
       sys.stderr.write(f'{return_json(toSend)}')
-
+      if isinstance(event.part, ToolReturnPart): 
+        nodes.append(
+          f'[ToolReturnPart] From {event.part.tool_name} with contents? => {event.part.has_content()}'
+        )
+        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': daType, 'data':f'{event.part.tool_name} with  contents? => {event.part.has_content()}' }
+        sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
     elif isinstance(event,FunctionToolResultEvent):#ToolReturnPart | RetryPromptPart
       nodes.append(
         f'[FunctionToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
       )
-      sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part.outcome!r}' })}') #, flush=True) #{event.part.content!r}
+      sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part!r}' })}') #, flush=True) #{event.part.content!r}
       if isinstance(event.part, ToolReturnPart):
         nodes.append(
           f'====[ToolReturnPart] Part >> {event.part!r}'
@@ -520,7 +523,7 @@ async def with_iter(agent, q, instructions, use_question):
       if Agent.is_user_prompt_node(node):
         daType = 'UserPromptNode'
         nodes.append(f'=== UserPromptNode ===') #{node.user_prompt}
-        toSend = {'OfType': 'NodeType','type': daType, 'data': f' No user_prompt?:{node.user_prompt is None} <> No instructions?: {node.instructions is None}' }
+        toSend = {'OfType': 'NodeType','type': daType, 'data': f' Has user_prompt?:{node.user_prompt is not None} <> has instructions?: {node.instructions is not None} <> has sys_prompt?: {len(node.system_prompts)}' }
         sys.stderr.write(f'{return_json(toSend)}')# , flush=True) #>>oldie >> sys.stdout.write
       elif Agent.is_model_request_node(node):
         daType = 'ModelRequestNode'
@@ -549,7 +552,8 @@ async def with_iter(agent, q, instructions, use_question):
               nodes.append(f'[Output] >> ModelRequestNode >> {output}') ##too noisy
               ##could check whole request_stream that not failed?...todo**
               #continue
-              #sys.stderr.write(f'[Output] >> ModelRequestNode >> {output}') #toSee
+              #sys.stderr.write(f'[Output] >> ModelRequestNode >> {output}') #too noisy
+              #print((f'[Output] >> ModelRequestNode >> {output}'),flush=True) 
       elif Agent.is_call_tools_node(node):
         daType = 'CallToolsNode'
         nodes.append(f'\n === CallToolsNode: streaming partial response & tool usage ===')
@@ -574,6 +578,7 @@ async def with_iter(agent, q, instructions, use_question):
   usage = agent_run.result.usage
   tokens = {'OfType': 'Tokens','input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
   print(f'{return_json(tokens)}', flush=True)
+  #sys.stderr.write(return_json(tokens))
 
   #print(output_messages,sep="\n", flush=True)
   #sys.stderr.write(f'{return_json(tokens)}')
@@ -593,8 +598,8 @@ async def main():
                       type=str,
                       help='user question for Ollama model',
                       required=True)
-  parser.add_argument('--prompt', 
-                      metavar='p', 
+  parser.add_argument('--instructions', 
+                      metavar='i', 
                       type=str,
                       help='instructions',
                       required=False)
@@ -625,16 +630,16 @@ async def main():
   #another = get_daate() #this borked cause no await prolly?
   ### 'run_sync' is just a wrapper around 'run' and agents are always run in an async context.
   fromScript = args.fromP
-  prompt = args.prompt
+  instructions = args.instructions
   sys_prompt = args.sys_prompt
 
   use_question = True if fromScript == 'api-assistant' else False
 
-  my_agent = create_run_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent()
+  my_agent = create_run_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent(instructions)
 
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
-    result = await with_iter(my_agent, q=question, instructions=prompt, use_question=use_question) #,sys_prompt=sys_prompt
+    result = await with_iter(my_agent, q=question, instructions=instructions, use_question=use_question) #,sys_prompt=sys_prompt
     #agenty = create_agent(prompt,fromScript) #toUse? toTest**
     d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript }
     print(f'{return_json(d)}', flush=True)
