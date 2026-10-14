@@ -463,7 +463,7 @@ IMPORTANT OPERATING RULES FOR THIS SESSION
   const postedSegment = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "";
 
   switch (kind) {
-    case undefined:
+    //case undefined:
     case 'fix-portal': return `${baseInstru}\n${something}
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
 2. Open portals.yml, find the "${input}" entry under tracked_companies, and update its careers_url (and any api/slug field) to the suggested WORKING ATS URL. Change ONLY this one company; preserve all other YAML structure, comments and formatting exactly.
@@ -503,13 +503,13 @@ Target: ${input}`; //(blocks A–F, G posting-legitimacy, and the Machine Summar
   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
 2. Persist the resulting report CANONICALLY so the web and the CLI share ONE source of truth:
-   a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
+   a. Reserve a report number: run command \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
-      num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
-   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
-   e. Release the sentinel by running \`node reserve-report-num.mjs --release {num}\` once the report is written and saved.
+      num \tdate  \tcompany \trole  \tstatus  \tscore \tpdf \treport  \tnotes \turl
+      {num} \t${today}  \t{Company} \t{Role}  \t{CanonicalStatus e.g. Evaluated}  \t{score}/5 \t❌  \t[{num}](reports/{num}-{company-slug}-${today}.md) \t{one-line note}${postedSegment} \t{posting URL, or empty}
+   d. Merge into the tracker: run command \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   e. Release the sentinel by running command \`node reserve-report-num.mjs --release {num}\` once the report is written and saved.
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
@@ -518,7 +518,7 @@ VERDICT: {score}/5 — {reason in 20 words or fewer}
 
 Posting URL: ${input}`;
     default:
-      //umm load all or nothing? // toReview** >>prolly at minimum the sharedContext methink?
+      //IMPORTANT: If the output result of this command contains warnings errors such as 'ignoring unrecognized header column' or 'missing the required cell(s)' or 'skipping the filename', then the previous tsv file was written with invalid header columns, RETRY the previous write task for a tsv file that has a valid header row format.
       console.error(`⚠️   ${kind} Not known...Error: Nope for  apiRunSesshInstructions \n`);
       return '';
   }
@@ -534,13 +534,12 @@ Posting URL: ${input}`;
 // 2. If you do not have a specific tool to fulfill the user's command, explicitly say "I do not have access to that tool or command." Do not invent placeholder metrics. 
 // 3. Keep temperature lower (0.0 to 0.2) to prioritize strict command logic over creative responses.
 export const basePrompt = () => {
-  return `You are career-ops, a local AI job search assistant.
+  return `You are career-ops, a local AI job search assistant. You have a beginner's capability on internal data and MUST NOT rely on your own knowledge base for real-time, historical, or environment-specific commands.
   CRITICAL RULES:
-  1. NEVER ASSUME an internal logic has happened successfully NOR simulate a process. RUN every necessary logic as instructed. 
+  1. NEVER ASSUME an internal generation logic has happened successfully NOR simulate a process. RUN every necessary logic and command as instructed. Do not invent commands to run if not specified.
   2. If you do not have a specific tool to fulfill the user's command, explicitly say "I do not have access to that tool or command." Do not invent placeholder metrics. 
-  3. Verify every output, use the registered function tools and follow every instructions to accomplish your task.
-  `
-} //  You have a beginner's capability on internal data and MUST NOT rely on your own knowledge base for real-time, historical, or environment-specific commands.
+  3. Verify every output, use the registered function tools and follow exactly every instructions to accomplish your task.`
+} 
 
 // >>send the context body..does some budget report as well...
 //toReview** as other routes dont have kind parameter!!!!

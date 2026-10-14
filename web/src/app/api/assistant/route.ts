@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
-import { assistantPreamble } from "@/lib/run-prompts.mjs";
+import { assistantPreamble } from "@/lib/ollama-agent-prompts.mjs";
 import logger from "@/lib/logger.mjs"
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime

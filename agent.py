@@ -23,7 +23,7 @@ from pathlib import Path
 import random
 from datetime import date
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_ai import (
     Agent, 
     RunContext,
@@ -41,6 +41,7 @@ from pydantic_ai.messages import (
     OutputToolResultEvent,
     ThinkingPartDelta,
     TextPartDelta,
+    TextPart, 
     ToolCallPartDelta,
     ThinkingPart,
     FinalResultEvent, 
@@ -82,7 +83,7 @@ class WriteFileArgs(BaseModel):
   path: str = Field(description="The target file path")
 
 random.seed(None)
-seed = random.randint(1, 100) #umm for model seed? toSee..
+seed = 53 #random.randint(1, 100) #umm for model seed...but better to keep same? toTry 48 || 34 ?
 
 model = OllamaModel(
     'gemma4:e4b-mlx', #'gemma4', 
@@ -118,7 +119,7 @@ subAgent_model = OllamaModel(
 #        }} ## 8192-16384 for long documents >>NOPE abruptly stop when set...
 ##umm could try and set different temperature, top_k || top_p per run as well? toTry**
 
-
+"""
 reader_agent = Agent(
     subAgent_model,
     name='reader_agent',
@@ -137,6 +138,7 @@ writer_agent = Agent(
     output_type = str,
     toolsets=[custom_tools]
   ) 
+"""
 
 
 def write_to_file(indat, filename="output.txt"):
@@ -253,6 +255,7 @@ def create_assistant_agent(instructions) -> Agent:
   # 4. Return the configured agent
   return assistant
 
+"""
 def create_run_agent(sys_prompt) -> Agent:
   # 1. Define dependencies if needed (optional)
   # class MyDeps: ...
@@ -262,8 +265,8 @@ def create_run_agent(sys_prompt) -> Agent:
     model,
     #deps_type=str,
     system_prompt=sys_prompt,
-    #instructions="Use the registered function tools. DO NOT run command",
-    retries={'tools': 3, 'output': 1},
+    #instructions="Use the registered function tools. DO NOT run command", #can now retry output twice below..toSee
+    retries={'tools': 3, 'output': 2},
     toolsets=[custom_tools],
     capabilities=[
       #FileSystem(root_dir='.'),
@@ -325,7 +328,7 @@ def create_run_agent(sys_prompt) -> Agent:
 
   #@agent.tool #(name="append_to_file", description='Append given content to an existing file')
   def append_to_file(ctx: RunContext[Any], args: WriteFileArgs) -> str: #path: str, content_chunk: str
-    """Append a chunk of text to a specific file path.""" 
+    #Append a chunk of text to a specific file path.
     real_path = os.path.join(os.getcwd(),args.path)
     with open(real_path, "a") as file:
         file.write(args.content)
@@ -333,7 +336,7 @@ def create_run_agent(sys_prompt) -> Agent:
 
   #@agent.tool_plain #(name="file_exists", description='Checks that a file exist at the given path')
   def file_exists(fpath: str) -> bool:  #ctx: RunContext[Any], 
-    """Checks that a file exist at the given path.""" 
+    #Checks that a file exist at the given path. 
     real_path = os.path.join(os.getcwd(),fpath)
     if os.path.exists(real_path):
       sys.stderr.write(f'\n file_exists:, {fpath}, {real_path}, {os.path.isfile(real_path)}')
@@ -352,14 +355,58 @@ def create_run_agent(sys_prompt) -> Agent:
   #@agent.instructions
   def instructions() -> str:  
     return f'Delegate single task per sub agent.'
-    
   
   #@agent.system_prompt  #toTry?
   def critical_rules() -> str:   
     return f'{sys_prompt}' #f'The date is {date.today()}.'
 
+  #@agent.output_validator --ToTry
+  def validate_profile(ctx: RunContext[None], output:str) -> str: #UserProfile
+      if output.age < 0:
+          raise ModelRetry("Age cannot be negative. Please correct the output.")
+      return output
+  
+  
   # 4. Return the configured agent
   return agent
+"""
+
+def run_singleton_agent(sys_prompt) -> Agent:
+  agent = Agent(
+    model,
+    #deps_type=str,
+    system_prompt=sys_prompt,
+    #instructions="Use the registered function tools. DO NOT run command", #can now retry output twice below..toSee
+    retries={'tools': 3, 'output': 2},
+    toolsets=[custom_tools],
+    capabilities=[
+      WebSearch(local='duckduckgo'),
+      WebFetch(local=True),
+      LocalWorkspace('.'),
+      Shell(), #persist_cwd=True
+      #RepoContext(
+      #  workspace_dir=Path('.'), # nope for > home_dir=Path.home() >>so doesnt walk up to home_dir
+      #  filenames=('AGENTS.md'), #'CLAUDE.md',
+      #  asset_roots=('.agents')),  #wonder if will find SKILL.md in subfolder OR need to specify it in filenames parameter?
+      #Thinking(effort='high'),
+      #SubAgents(include_self=True, inherit_tools=True), #naah
+      #SubAgents(agents=[SubAgent(reader_agent), SubAgent(writer_agent)]) #inherit_tools gon be deprecated tho smh.. , inherit_tools=True...
+    ])
+  
+  @agent.output_validator
+  def validate_profile(output:str) -> str: #yup no need param?>> ctx: RunContext[None],
+      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_profile", 'outputSize':len(output)})) #huh does get invoked before EndNode 
+      #sys.stdout.flush()
+      if len(output) > 200:
+        sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH ERROR size validate_profile", 'outputSize':len(output)}))
+        raise ModelRetry("Too Large output. Make sure ALL the persistence steps were followed.")
+      
+      return output
+  
+  
+   # 4. Return the configured agent
+  return agent
+
 
 '''
 ## for when need subagents? wonder if ok to declare them here?
@@ -406,89 +453,81 @@ nodes = []
 def record_event(event: AgentStreamEvent, daType:str) -> None:
   try:
     if isinstance(event, FinalResultEvent):
-      toSend = {'OfType': 'NodeType','type':'FinalResultEvent','data':f'({event.tool_name})' }
-      sys.stderr.write(f'{return_json(toSend)}')
+      toSend = {'OfType': 'NodeType','type':'FinalResultEvent', 'from': f'{daType}' , 'data':f'({event!r})' }
+      sys.stderr.write(return_json(toSend))
       return #just to not go below....   
     if isinstance(event, PartStartEvent):
       nodes.append(f'[Request] Starting part {event.index}: {event!r} \n')
       if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
         nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
-        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data': f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}' })}') #, flush=True)
+        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}'}
+        sys.stderr.write(f'{return_json(toSend)}')
+        #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data': f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}' })}') #, flush=True)
     elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
       if isinstance(event.delta, TextPartDelta): 
-        nodes.append(
-          f'[TextPartDelta] Part {event.index} text delta: {event.delta.content_delta!r}'
-        )
+        nodes.append(f'[TextPartDelta] Part {event.index} text delta: {event.delta.content_delta!r}')
       elif isinstance(event.delta, ToolCallPartDelta):
-        nodes.append(
-          f'[ToolCallPartDelta] Part {event.index} args delta: {event.delta.args_delta!r}'
-        )
+        nodes.append(f'[ToolCallPartDelta] Part {event.index} args delta: {event.delta.args_delta!r}')
       #elif isinstance(event.delta, ThinkingPartDelta): #too much
       #  nodes.append(
       #    f'[ThinkingPartDelta] Part {event.index} thinking delta: {event.delta.content_delta!r}'
       #  )
-    #elif isinstance(event, ToolReturnPart): #prolly cant happen? nope
-    #  nodes.append(f'[WOAH] ToolReturnPart? {event.tool_name} :: {event.part.part_kind} >> {event.part.args!r}')
-    elif isinstance(event,PartEndEvent): # ModelResponsePart = TextPart | ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart | NativeToolSearchCallPart | NativeToolCallPart | NativeToolSearchReturnPart | NativeToolReturnPart | ThinkingPart | CompactionPart | FilePart | SpeechPart
+    elif isinstance(event,PartEndEvent): 
+      # ModelResponsePart = TextPart | ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart | NativeToolSearchCallPart | NativeToolCallPart | NativeToolSearchReturnPart | NativeToolReturnPart | ThinkingPart | CompactionPart | FilePart | SpeechPart
       #nodes.append(f'[WOAH] PartEndEvent? {event!r}')
       #toSend = {'OfType': 'NodeType','type':'PartEndEvent','from?': daType, 'data':f'{event!r}'} #, 'extra': f'{event.part.part_kind} >> {event.next_part_kind if event.next_part_kind is not None else '' }
       #sys.stderr.write(f'{return_json(toSend)}')
       if isinstance(event.part, ThinkingPart): 
         nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
-        toSend = {'OfType': 'NodeType','type':'ThinkingPart','fromy': daType, 'data':f'{event!r}' }
+        toSend = {'OfType': 'NodeType','type':'ThinkingPart','from': f'{daType} <> PartEndEvent', 'data':f'{event!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
       elif isinstance(event.part,ToolCallPart):
         nodes.append(f'[ToolCallPart] >> \n {event.part!r}')
-        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data':f'{event.part!r}' }
+        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartEndEvent', 'data':f'{event.part!r}' }
+        sys.stderr.write(f'{return_json(toSend)}')
+      elif isinstance(event.part,TextPart):
+        nodes.append(f'[TextPart] >> \n {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'TextPart','from': f'{daType} <> PartEndEvent', 'data':f'{event.part!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
       else:
         nodes.append(f'[PartEndEvent..huh unknown?] >> \n {event.part!r}')
-        toSend = {'OfType': 'NodeType','type':'Unknown?','frum': daType, 'data':f'{event!r}' }
+        toSend = {'OfType': 'NodeType','type':'Unknown?','from': f'{daType} <> PartEndEvent', 'data':f'{event!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
-    elif isinstance(event.part, ThinkingPart): #?!? happens at end of all the multiple ThinkingPartDelta...should be caught by above tho..
-      nodes.append(f'[ThinkingPart..huh] >> \n {event.part.content!r}')
-      toSend = {'OfType': 'NodeType','type':'ThinkingPart','from?': daType, 'data':f'{event!r}' }
-      sys.stderr.write(f'{return_json(toSend)}')
     elif isinstance(event,FunctionToolCallEvent):
-      nodes.append(
-        f'[FunctionToolCallEvent] Part  Args => {event!r}'
-      )
-      toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','frooom': daType, 'data':f'{event!r}' }
-      #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}') #, flush=True)
+      nodes.append(f'[FunctionToolCallEvent] Args => {event!r}')
+      toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data':f'{event!r}' } #'data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}')
       sys.stderr.write(f'{return_json(toSend)}')
-      if isinstance(event.part, ToolReturnPart): 
-        nodes.append(
-          f'[ToolReturnPart] From {event.part.tool_name} with contents? => {event.part.has_content()}'
-        )
-        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': daType, 'data':f'{event.part.tool_name} with  contents? => {event.part.has_content()}' }
-        sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
-    elif isinstance(event,FunctionToolResultEvent):#ToolReturnPart | RetryPromptPart
-      nodes.append(
-        f'[FunctionToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
-      )
-      sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {event.part!r}' })}') #, flush=True) #{event.part.content!r}
-      if isinstance(event.part, ToolReturnPart):
-        nodes.append(
-          f'====[ToolReturnPart] Part >> {event.part!r}'
-        )
-        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': daType, 'data':f'{event.part!r}' }
+      if isinstance(event.part, ToolReturnPart): #prolly dont get here either as ToolReturn is handled below...
+        nodes.append(f'[ToolReturnPart] huh? From {event.part.tool_name} with contents? => {event.part.has_content()}')
+        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event.part.tool_name} with contents? => {event.part.has_content()}' }
         sys.stderr.write(f'{return_json(toSend)}')
-      if isinstance(event.part,RetryPromptPart):
-        nodes.append(
-          f'====[RetryPromptPart] Part >> {event.part!r}'
-        )
-        toSend = {'OfType': 'NodeType','type':'RetryPromptPart','from': daType, 'data':f'{event.part!r}' }
+      elif isinstance(event.part, ToolCallPart):
+        nodes.append(f'[ToolCallPart] From {event.part!r}')
+        toSend = {'OfType': 'NodeType','type': 'ToolCallPart','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event.part!r}' }
+        sys.stderr.write(return_json(toSend))
+      else:
+        nodes.append(f'[FunctionToolCallEvent..huh unknown?] >> \n {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'Unknown?','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event!r}' }
+        sys.stderr.write(f'{return_json(toSend)}')
+    elif isinstance(event,FunctionToolResultEvent):#ToolReturnPart | RetryPromptPart
+      nodes.append(f'[FunctionToolResultEvent] >> {event.part.tool_name} with contents: \n {event.part.content!r}')
+      sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {len(repr(event.part))}' })}') #, flush=True) #{event.part.content!r}
+      if isinstance(event.part, ToolReturnPart):
+        nodes.append(f'====[ToolReturnPart] Part >> {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolResultEvent', 'data':f'{event.part!r}' }
+        sys.stderr.write(return_json(toSend))
+      elif isinstance(event.part,RetryPromptPart):
+        nodes.append(f'====[RetryPromptPart] Part >> {event.part!r}')
+        toSend = {'OfType': 'NodeType','type':'RetryPromptPart','from': f'{daType} <> FunctionToolResultEvent', 'data':f'{event.part!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
     elif isinstance(event,OutputToolCallEvent):
-      nodes.append(
-        f'[OutputToolCallEvent] Part {event.part.tool_name} with args: \n {event.part.args!r}'
-      )
+      nodes.append(f'[OutputToolCallEvent] Part {event.part.tool_name} with args: \n {event.part.args!r}')
       toSend = {'OfType': 'NodeType','type':'OutputToolCallEvent','from': daType, 'data':f'{event.part!r}' }
       sys.stderr.write(f'{return_json(toSend)}')
     elif isinstance(event,OutputToolResultEvent):#event.part >>  ToolReturnPart | RetryPromptPart
-      nodes.append(
-        f'[OutputToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}'
-      )
+      nodes.append(f'[OutputToolResultEvent] Part {event.part.tool_name} with contents: \n {event.part.content!r}')
+      toSend = {'OfType': 'NodeType','type':'OutputToolResultEvent','from': daType, 'data':f'{event!r}' }
+      sys.stderr.write(f'{return_json(toSend)}')
     return
   except Exception as e:
     # Handles other unexpected errors like AttributeError access smh
@@ -497,26 +536,24 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
     return
 
 
-async def with_iter(agent, q, instructions, use_question):
+async def with_iter(agent, prompt, instructions):
   """
   Pass in question prompt for LLM to iter over agent graph's nodes as they are executed.
   Args:
-    q: user prompt
+    agent : Agent object that execute prompt
+    prompt: user prompt
     instructions: instructions
-    use_question: whether to use the question or the instructions for the user prompt
-    sys_prompt : when user_prompt consumes instructions, the instructions consumes any system prompt 
   Returns:
     Agent output results
-  """
-  sys.stdout.write(return_json({'OfType': 'Info', 'Seed': seed, 'usedQuestion?':use_question, 'prompt':q, 'ollama_at':ollama_base_url,'instru': instructions }))  # 'hasSysPrompt': sys_prompt is not None
+  """ #use_question: whether to use the question or the instructions for the user prompt ##'usedQuestion?':use_question, 
+  sys.stdout.write(return_json({'OfType': 'Info', 'Seed': seed, 'actRandom': random.randint(1, 100), 'prompt':prompt, 'ollama_at':ollama_base_url,'instru': instructions }))  # 'hasSysPrompt': sys_prompt is not None
   sys.stdout.flush()
   #weirdly print at end? >>cause was buffered so need to add flag 'flush=True' or flush as above smh
   # deps='Frank',
-  #nodes: list[str] = [] #was output_messages..was giving probs?
 
-  async with agent.iter(user_prompt=q if use_question else instructions,
-                        instructions=instructions if use_question else None, 
-                        retries=3) as agent_run:
+  async with agent.iter(user_prompt= prompt, #q if use_question else instructions,
+                        instructions=instructions, #if use_question else None, 
+                        retries=5) as agent_run:
     async for node in agent_run:
       #sys.stderr.write(f'{return_json({'Action':repr(node)})}')
       daType = ''
@@ -534,9 +571,7 @@ async def with_iter(agent, q, instructions, use_question):
           async for event in request_stream:
             #record_event(event, daType) #here? umm nah?
             if isinstance(event, FinalResultEvent):
-              nodes.append(
-                f'[Result] The model started producing a final result (tool_name={event.tool_name})'
-              )
+              nodes.append(f'[Result] The model started producing a final result (tool_name={event.tool_name})')
               toSend = {'OfType': 'NodeType','type':'FinalResultEvent','data':f'({event.tool_name})' }
               sys.stderr.write(f'{return_json(toSend)}') #, flush=True)
               final_result_found = True
@@ -557,7 +592,7 @@ async def with_iter(agent, q, instructions, use_question):
       elif Agent.is_call_tools_node(node):
         daType = 'CallToolsNode'
         nodes.append(f'\n === CallToolsNode: streaming partial response & tool usage ===')
-        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':daType,'data': "streaming partial response & tool usage"})}') #, flush=True)
+        #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':daType,'data': "streaming partial response & tool usage"})}') #, flush=True)
         async with node.stream(agent_run.ctx) as handle_stream:
           async for event in handle_stream:
             record_event(event, daType)
@@ -633,20 +668,24 @@ async def main():
   instructions = args.instructions
   sys_prompt = args.sys_prompt
 
-  use_question = True if fromScript == 'api-assistant' else False
+  useAssistantAgent = True if fromScript == 'api-assistant' else False
 
-  my_agent = create_run_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent(instructions)
+  #my_agent = run_singleton_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent(instructions) #create_run_agent
 
+  my_agent = run_singleton_agent(instructions if useAssistantAgent else sys_prompt)
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
-    result = await with_iter(my_agent, q=question, instructions=instructions, use_question=use_question) #,sys_prompt=sys_prompt
-    #agenty = create_agent(prompt,fromScript) #toUse? toTest**
+    result = await with_iter(my_agent, question, instructions if not useAssistantAgent else None) #, use_question=use_question #,sys_prompt=sys_prompt
+    
     d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript }
     print(f'{return_json(d)}', flush=True)
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])
     #sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork? >>ouf can make for a laaarge file
 
+  except ValidationError as e:
+    # Catch only if retries exhausted (max_retries=3 is default)--toSee
+    print(f'Error::with_iter >> Validation failed after retries: {e!r}')
   except Exception as e:
     #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
     print('An error occurred::with_iter >>',repr(e.args),repr(e.__class__), f'{e.__traceback__!r}')

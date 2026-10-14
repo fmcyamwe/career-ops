@@ -8,6 +8,7 @@ import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registr
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
 import { basePrompt, buildSysPrompt, apiRunSesshInstructions } from "@/lib/ollama-prompts.mjs"; //Olama system prompts
+import { buildApiRunPrompt } from "@/lib/ollama-agent-prompts.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
@@ -153,14 +154,19 @@ export async function POST(req: Request) {
   const opts = {kind, input, memory: readMemory(), today, postedAt, lang:null, paths: pdfPaths };//bof lang will default
   let sysPrompt = ''
   let instructions = ''
+  let question = ''
 
   if(isOllama){
     sysPrompt = basePrompt(); //oldie but goes over the context smh //buildSysPrompt(kind, "apiRun");
-    //buildSysPrompt(kind, "apiRun"); //just to see...redundant tho smh
-    instructions = apiRunSesshInstructions(opts);
+    //buildSysPrompt(kind, "apiRun"); // redundant == ~49K
+    //instructions = apiRunSesshInstructions(opts);  //obsolete
+    const { instruction, prompt } = buildApiRunPrompt(opts); 
+    logger.info(`prompts: ${prompt} >>`); //, {instruction}
+    instructions = instruction || "";
+    question = prompt || "";
   }
 
-  const prompt = isOllama ? sysPrompt : buildPrompt(opts); 
+  const prompt = isOllama ?  question : buildPrompt(opts);  //sysPrompt
 
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
   // guardrail). 'evaluate' runs the REAL mode + persists canonical artifacts →
@@ -184,11 +190,11 @@ export async function POST(req: Request) {
       // '-v' instead for uv? --meh no need with flush flag in print 
       'agent.py',
       '--question',
-      `${input}`, //kind === "evaluate" ? `Follow the instructions for this Posting URL: ${input}` : ${input}
+      prompt, //`${input}`, //kind === "evaluate" ? `Follow the instructions for this Posting URL: ${input}` : ${input}
       "--instructions",
       instructions,
       "--sys_prompt",
-      prompt,
+      sysPrompt,
       "--allowedTools",
       tools.allowed, 
       "--disallowedTools", 
@@ -221,7 +227,7 @@ export async function POST(req: Request) {
   let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}
   logger.info("🤖 api-Run::POST", {...lo}) 
 
-  logger.toFile(filePath, `\n Start: ${instructions} \n\n with context: \n ${prompt}`)
+  logger.toFile(filePath, `\n Start: ${instructions} \n\n with context: \n ${prompt} \n`)
   
 
   const child = isOllama ? 
@@ -403,18 +409,16 @@ export async function POST(req: Request) {
         try {
           oContent = JSON.parse(line);
           let OfType = oContent.OfType || undefined
-          switch (OfType) { //smh falls through without return on a case smh
-            case undefined: return logger.error("🤖 streamNodeInfo ERROR?--undefined OfType", {content:  line.slice(0, 200)}); //throw new Error("ERROR YO, no type!!");
+          switch (OfType) {
+            case undefined: return logger.error("🤖 streamNodeInfo ERROR?--undefined OfType", {content:  line});
             case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
             case 'Tokens': return saveTokens(line);
-            case 'Info': return logger.toFile(filePath, `\n ${line} \n`); //bon save this to file
-            //case 'NodeType': return streamNodeAction(oContent);
-            //todo** add for case funct tool error?
+            case 'Info': return logger.toFile(filePath, `\n ${line} \n`);
             default:
               logger.error("🤖 streamNodeInfo >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})
           }
         } catch {
-          console.error(`🤖   streamNodeInfo >>Ollama...ERROR json!! \n ${line} \n`);
+          console.error(`\n🤖   streamNodeInfo >>Ollama...ERROR json!! \n ${line} \n`);
         }
       }
 
@@ -439,35 +443,18 @@ export async function POST(req: Request) {
         //if (!spec.parseEvent) return;
         //const ev = spec.parseEvent(line);
         ////status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
-        if(spec.parseEvent){ 
+        if(spec.parseEvent){
           const ev = spec.parseEvent(line);
           if(ev){
             console.error(ev);
-            return send({...ev}); //toReview below...
-            //also add emittedText = true;
+            emittedText = true;
+            return send({...ev});
           }else{
-            logger.error("🤖 ERROR?--parseEvent is null eh...", {content: line.length}); 
+            logger.error("🤖 ERROR?--parseEvent is null eh...", {size: line.length, example: line.slice(0, 200)}); 
+            return 
           }
-        };
-
-        let oContent;
-        try {
-          oContent = JSON.parse(line);
-          let OfType = oContent.OfType || undefined
-          switch (OfType) { //smh falls through without return on a case smh
-            case undefined: return logger.error("🤖 ERROR?--undefined OfType", {content:  line.slice(0, 200)}); //throw new Error("ERROR YO, no type!!");
-            case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
-            case 'Tokens': return saveTokens(line);
-            case 'Info': return logger.toFile(filePath, `\n ${line} \n`);
-           //case 'NodeType': return streamNodeAction(oContent); //no need as should be handled above..
-            default:
-              logger.error("🤖 parseOllamaEvt >>ERROR?--No OfType", { closed: closed, OfType: OfType || cliId, content: line.slice(0, 200)})
-          }
-
-        } catch {
-          console.error(`🤖   parseOllamaEvt >>Ollama...ERROR json!! \n ${line} \n`);
         }
-      }
+      };
       
       child.stdout.on("data", (d: Buffer) => { //chunk: string
         if (closed) return;
@@ -487,31 +474,7 @@ export async function POST(req: Request) {
         while ((nl = buf.indexOf("\n")) !== -1) {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
-          //if (!line) continue;
           if (line) processParsedLine(line);
-          /* try {
-            const ev = JSON.parse(line);
-            if (ev.type === "stream_event") {
-              const e = ev.event;
-              if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
-                send({ type: "tool", name: e.content_block.name });
-              } else if (e?.type === "content_block_delta" && e.delta?.text) {
-                emittedText = true;
-                send({ type: "text", text: e.delta.text });
-              }
-            } else if (ev.type === "system" && ev.subtype === "init") {
-              send({ type: "status", label: "Agent ready" });
-            } else if (ev.type === "result") {
-              // Capture the per-run cost; the authoritative "done" is sent on close
-              // (so the honesty gate decides done-vs-error first). Tokens = the same
-              // formula /api/usage uses: input + output + cache-creation.
-              const u = ev.usage || {};
-              lastTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
-              if (typeof ev.total_cost_usd === "number") lastCostUsd = ev.total_cost_usd;
-            }
-          } catch {
-            //partial line 
-          }*/
         }
       });
 
@@ -558,7 +521,7 @@ export async function POST(req: Request) {
         // 'close' event disappear, just delays it. Without this guard a pdf
         // run could still start a brand-new render (and re-touch the tracker)
         // after the stream — and its writeToken guard — is already gone.
-        if (closed) return; //toReview**
+        if (closed) return; 
 
         // A timeout is the ROOT cause behind every "no report / not clean"
         // symptom the gates below test, so classify it FIRST, for any kind.

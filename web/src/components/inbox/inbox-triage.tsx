@@ -139,10 +139,10 @@ export function InboxTriage({ inbox, reports }: { inbox: InboxJob[], reports:App
 
   const hasBeenEvald = (url: string, job: InboxJob) => {
 
-    let insid = reports.filter((r) => job.company == r.company);  //no case sensitive...hopefully 
-    //SO bad having to only connect by company!!...like umm url!!
-    let isit = inbox.filter((s) => s.company  == job.company); //=== or == ?
-    //console.log("muahaha-hasBeenEvald", url, job.company, isit.length , insid );
+    let insid = reports.filter((r) => job.role == r.role); 
+    //SO bad having to only connect by company!!....bon better to check for role..no case sensitive...hopefully 
+    //let isit = inbox.filter((s) => s.role  == job.role); //=== or == ?
+    //console.log("muahaha-hasBeenEvald", url, job , insid );
 
     return insid.length > 0 ;  //insid.some((s) => s.url === url); //=== or == ?
   }
