@@ -92,8 +92,8 @@ export async function POST(req: Request) {
         `${message}`,
         '--instructions',
         `${prompt}`,
-        '--sys_prompt',
-        `${sysPrompt}`,
+        //'--sys_prompt',
+        //`${sysPrompt}`,
         '--fromP',
         'api-assistant',
         //also allowedTools && disallowedTools? prolly...todo**

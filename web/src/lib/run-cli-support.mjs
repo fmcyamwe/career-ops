@@ -382,10 +382,10 @@ function streamNodeAction(node) {
     case 'TextPart': return { type: "text", text:data};
     case 'FinalEndNode': return {}; //{ type: "status", label: data }; //too much
     case 'ToolCallPart': return { type: 'tool', name: etype, text: data };
-    case 'FunctionToolCallEvent': return { type: 'tool', name: etype, text: data }; 
+    case 'FunctionToolCallEvent': return {};  //{ type: 'tool', name: etype, text: data }; //too much
     case 'FunctionToolResultEvent': return { type: 'tool', name: etype, text: data };
     case 'ThinkingPart': return { type: "text", text: 'just thinkin...' }; //data // bon should show nothin...
-    case 'ToolReturnPart': return { type: 'tool', name: etype, text: String(data).length }; //not show everything...
+    case 'ToolReturnPart': return { type: 'tool', name: etype, text: data }; //not show everything...String(data).length
     case 'RetryPromptPart': return { type: 'tool', name: etype, text: data }; 
     default:
       //return { text: evt.data }; //default or return null below?

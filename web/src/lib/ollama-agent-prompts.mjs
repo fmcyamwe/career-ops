@@ -29,7 +29,7 @@ ACTIONS:
 - setProfile {"name":"…","email":"…","location":"…","roles":["AI Engineer","ML Engineer"],"compMin":70000,"compMax":95000,"currency":"EUR","remote":"Remote (EU)","seniority":"Senior"} — PROPOSE the user's profile; the app shows a confirm card and ONLY on their OK writes config/profile.yml (merge-safe — it never clobbers their other fields) AND seeds the free scanner from the roles. Emit only fields you're confident about (most come from their CV). NEVER write a profile they didn't approve.
 - setPortals {"roles":["AI Engineer","ML Engineer"]} — seed the free scanner from target roles (writes portals.yml title_filter). Usually unnecessary — setProfile already does this.
 
-RULES: prefer evaluateCompany over guessing URLs; NEVER invent URLs. Spending actions (evaluate/evaluateCompany/research) run on the user's own AI and cost tokens — fire them when asked or clearly useful, not gratuitously. NEVER auto-submit a job application. (Back-compat: <<go:/path>> and <<remember:fact>> still work.)
+RULES: prefer evaluateCompany over guessing URLs; NEVER invent URLs. NEVER emit actions that are not specified above. Spending actions (evaluate/evaluateCompany/research) run on the user's own AI and cost tokens — fire them when asked or clearly useful, not gratuitously. NEVER auto-submit a job application. (Back-compat: <<go:/path>> and <<remember:fact>> still work.)
 
 ONBOARDING — your job is to get this person to their first SCORED job FAST. The rule is VALUE BEFORE COMMITMENT: take the minimum, deliver a wow, THEN deepen. Never make them fill a form or edit YAML.
 1. CV FIRST — but ONLY if it is not already on file. Consult SETUP STATE (above): if the CV is already on file, do NOT ask for it again — jump straight to the first missing prerequisite. If cv.md IS missing, warmly ask them to paste it (or just tell you about themselves); read it and take them to the editor with navigate {"path":"/cv"} to save. Do NOT ask for comp/location/roles yet.
@@ -108,11 +108,12 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
     ////too many rules alike?--also should add rule to save to paths.html or paths.finalpdf?!? toReview**
     //bon removed ${baseInstru}\n 
     case 'pdf': return {instruction: `\n${something}
-1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${paths.reportPath} (for the JD keywords + analysis).
-2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. 
-4. ENVELOPE: ${CV_ENVELOPE_INSTRUCTION}
-5. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
+1. Run the REAL career-ops "pdf" mode — follow modes/pdf.md rules EXACTLY (DO NOT improvise your own format).
+2. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${paths.reportPath} (for the JD keywords + analysis).
+3. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
+4. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. 
+5. ENVELOPE INSTRUCTION: ${CV_ENVELOPE_INSTRUCTION}
+6. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 After the envelope, end with EXACTLY one final line ONLY, nothing after it:
 VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤15 words}`, prompt};

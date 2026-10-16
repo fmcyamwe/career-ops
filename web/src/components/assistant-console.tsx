@@ -359,8 +359,8 @@ export function AssistantConsole() {
         const { done, value } = await reader.read();
         if (done) break;
         acc += dec.decode(value, { stream: true });
-        console.log("\nweee api/assistant", acc)
         const { complete, hidePartialFrom } = parseEnvelopes(acc);
+        console.log(`\nweee api/assistant: \n${acc}`, complete,hidePartialFrom )
         const cuts: [number, number][] = complete.map((e) => [e.start, e.end]);
         if (hidePartialFrom >= 0) cuts.push([hidePartialFrom, acc.length]);
         let display = removeRanges(acc, cuts);

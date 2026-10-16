@@ -157,7 +157,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       const args = isClaude
         ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
         : isOllama ?
-        ['run','agent.py','--question',prompt,'--prompt',prompt, '--fromP', 'applyPrefill']
+        ['run','agent.py','--question',prompt,'--instructions',prompt, '--fromP', 'applyPrefill']
         : spec.args(prompt);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
@@ -178,6 +178,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
           }
           if (isOllama){
             let oContent;
+            //spec.parseEvent //toUse...
             try {
               //buf += d.toString(); //umm add to buf? >>naah prolly not? toReview**
               oContent = JSON.parse(d.toString()); //buf
@@ -187,6 +188,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
             } catch {
               //handle error?!? retry?
               console.error(`🤖  stream::apiApplyPrefill::onData::Run>>Ollama...ERROR json!! \n ${d.toString()} \n`, buf);
+              log(`${d.toString()} \n`)
             }
             return;
           }
@@ -195,6 +197,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
         child.stderr.on("data", (d: Buffer) => {
           const e = d.toString().trim();
           console.log(`🤖  stream::apiApplyPrefill::onData Errr....${e} \n`); 
+          log(`${e} \n`)
           if (e) log(`stderr: ${e.slice(0, 160).replace(/\s+/g, " ")}`);
         });
         const killer = setTimeout(() => {

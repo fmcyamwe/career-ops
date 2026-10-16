@@ -226,9 +226,9 @@ export async function POST(req: Request) {
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
   let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt, pdfs: pdfPaths? {...pdfPaths} : "None"}
-  logger.info("🤖 api-Run::POST", {...lo}) //remove**
+  //logger.info("🤖 api-Run::POST", {...lo})
 
-  logger.toFile(filePath, `\n Start: ${instructions} \n\n with prompt: \n ${prompt} \n\n and context: ${lo} `)
+  logger.toFile(filePath, `\n Start: ${instructions} \n\n with prompt: \n ${prompt} \n\n and context: ${JSON.stringify(lo)} `)
   
 
   const child = isOllama ? 
@@ -415,7 +415,7 @@ export async function POST(req: Request) {
 
         if (closer && vm) {
           const html = line.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
-          logger.error("🤖 parseVerdictLine >>some Verdict?", { vm: vm, closer: closer, html: html})
+          logger.error("🤖 parseVerdictLine >>some Verdict?", { vm: vm, closer: closer})//, html: html
           sendAgentText(html); //toSee
           send({ type: "text", text: vm[0] }); //closer[0]
         }
@@ -454,7 +454,8 @@ export async function POST(req: Request) {
           if(ev){
             console.error(ev);
             if(Object.keys(ev).length < 1){
-              logger.error("🤖 parseOllamaEvt--empty object eh", { example: line.slice(0, 200)})
+              //logger.error("🤖 parseOllamaEvt--empty object eh", { example: line.slice(0, 200)})
+              //whole node that gets saved to file anyway
               return 
             }
             if(ev.status == "Info"){

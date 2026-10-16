@@ -185,9 +185,10 @@ def return_json(data) -> str:
 
 #assistant agent --prolly no need for sys_prompt param? instructions prolly ok?
 #umm should still pass in sys prompt?
-##toSee when use instructions?
+##toSee when use instructions? > bof dont reply
 ##--also removed the tool functions...use toolsets=[custom_tools], ? 
-def create_assistant_agent(sys_prompt, instructions) -> Agent:
+##and params >> sys_prompt, instructions
+def create_assistant_agent() -> Agent:
   # 1. Define dependencies if needed (optional)
   # class MyDeps: ...
   
@@ -201,7 +202,7 @@ def create_assistant_agent(sys_prompt, instructions) -> Agent:
     model,
     #deps_type=str,
     #instructions=instructions,
-    system_prompt=sys_prompt,
+    #system_prompt=sys_prompt,
     retries={'tools': 3, 'output': 1},
     capabilities=[
       #SubAgents(include_self=True), #umm nah
@@ -220,13 +221,13 @@ def create_assistant_agent(sys_prompt, instructions) -> Agent:
       # cwd='.'
     ])
 
-  ##umm better here or iter run?
-  @assistant.instructions
-  def instructions() -> str:  
-    return f'{instructions}'
+  ##umm better here or iter run? #dont seem so smh
+  #@assistant.instructions
+  #def instructions() -> str:  
+  #  return f'{instructions}'
 
   # 3. Register tools using decorators
-  #@assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
+  @assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
   async def write_file(ctx: RunContext[Any],args: WriteFileArgs ) -> str: #path: str, content: str
     if not args.content.strip():
       print(f'\nassistant_write_file:, {args.path} Error: no content? {args.content}',flush=True)
@@ -250,7 +251,7 @@ def create_assistant_agent(sys_prompt, instructions) -> Agent:
       raise ModelRetry(f"Transient error writing {real_path}: {e}. Retry in a moment.")
 
 
-  #@assistant.tool(name="read_file", description='Reads files and returns their content')
+  @assistant.tool(name="read_file", description='Reads files and returns their content')
   async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
@@ -404,13 +405,13 @@ def run_singleton_agent(sys_prompt, skip_validation, calling_from) -> Agent:
   
   @agent.output_validator
   def validate_output(output:str) -> str: #yup no need for param  ctx: RunContext[None], >>  #huh does get invoked before EndNode 
-    sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_output", 'from': calling_from, 'doSkip': skip_validation, 'output':f'{output}' }))
+    sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_output", 'from': calling_from, 'doSkip': skip_validation, 'output':f'{len(output)}' }))
 
     close = f'<</cv-html>>'
     start = f'<<cv-html'
     if calling_from == 'api-run':
       is_present = close_mark_present(output)
-      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH close_mark_present", 'from': calling_from, 'doSkip': skip_validation, 'outputPresent':is_present})) #, 'tries':redo 
+      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH close_mark_present", 'from': calling_from, 'doSkip': skip_validation, 'outputPresent':is_present, 'output':f'{output}' if not is_present else 'Good...'})) #, 'tries':redo 
       #toReview for other cases...
       if not is_present:
         raise ModelRetry(f'Make sure the output is between properly formatted marker lines: {start} and {close}')
@@ -482,7 +483,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
       nodes.append(f'[Request] Starting part {event.index}: {event!r} \n')
       if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
         nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
-        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}'}
+        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name} <> {event.part.args}', 'fromPrevious': f'{event.previous_part_kind}'}
         sys.stderr.write(f'{return_json(toSend)}')
         #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data': f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}' })}') #, flush=True)
     #elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
@@ -509,9 +510,9 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
         nodes.append(f'[ThinkingPart] >> \n {event.part.content!r}')
         toSend = {'OfType': 'NodeType','type':'ThinkingPart','from': f'{daType} <> PartEndEvent', 'data':f'{event!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
-      elif isinstance(event.part,ToolCallPart):
+      elif isinstance(event.part,ToolCallPart): #toRemove not needed
         nodes.append(f'[ToolCallPart] >> \n {event.part!r}')
-        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartEndEvent', 'data':f'{event.part!r}' }
+        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartEndEvent', 'data': f'{event.part.tool_name} <> {event.part.args}' } #f'{event.part!r}'
         sys.stderr.write(f'{return_json(toSend)}')
       elif isinstance(event.part,TextPart): #never gets here either..toRemove
         nodes.append(f'[TextPart] >> \n {event.part!r}')
@@ -531,7 +532,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
         sys.stderr.write(f'{return_json(toSend)}')
       elif isinstance(event.part, ToolCallPart):
         nodes.append(f'[ToolCallPart] From {event.part!r}')
-        toSend = {'OfType': 'NodeType','type': 'ToolCallPart','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event.part!r}' }
+        toSend = {'OfType': 'NodeType','type': 'ToolCallPart','from': f'{daType} <> FunctionToolCallEvent', 'data': f'{event.part.tool_name} <> {event.part.args}'} #f'{event.part!r}'
         sys.stderr.write(return_json(toSend))
       else:
         nodes.append(f'[FunctionToolCallEvent..huh unknown?] >> \n {event.part!r}')
@@ -542,7 +543,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
       sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {len(repr(event.part))}' })}') #, flush=True) #{event.part.content!r}
       if isinstance(event.part, ToolReturnPart):
         nodes.append(f'====[ToolReturnPart] Part >> {event.part!r}')
-        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolResultEvent', 'data':f'{event.part!r}' }
+        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolResultEvent', 'data': f'{event.part.tool_name!r} <> {len(event.part.content)}' } #f'{event.part!r}'
         sys.stderr.write(return_json(toSend))
       elif isinstance(event.part,RetryPromptPart):
         nodes.append(f'====[RetryPromptPart] Part >> {event.part!r}')
@@ -632,7 +633,7 @@ async def with_iter(agent, prompt, instructions):
         except AssertionError as e:
           sys.stderr.write(f'{return_json({'OfType': 'Info','type':daType,'data': f"\nERROR AssertionError >> {e!r} "})}')
         nodes.append(f'=== Final Agent Output: {agent_run.result.output} ===') #output_messages
-        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','from': daType, 'data': f'{node.data.output}' })}') #, flush=True)
+        sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'FinalEndNode','from': daType, 'data': f'{len(node.data.output)}' })}') #, flush=True)
 
       #nodes.append(node)
       sys.stderr.write(f'{return_json({f'Action-{daType}':repr(node)})}')
@@ -703,11 +704,11 @@ async def main():
 
   useAssistantAgent = True if fromScript == 'api-assistant' else False
 
-  my_agent = run_singleton_agent(sys_prompt,skip_validation,fromScript) if fromScript == 'api-run' else create_assistant_agent(sys_prompt, instructions) #create_run_agent
+  my_agent = run_singleton_agent(sys_prompt,skip_validation,fromScript) if fromScript == 'api-run' else create_assistant_agent() # sys_prompt if sys_prompt is not None else instructions, instructions #create_run_agent
   #my_agent = run_singleton_agent(instructions if useAssistantAgent else sys_prompt, useAssistantAgent)
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
-    result = await with_iter(my_agent, question, instructions if not useAssistantAgent else None) #, use_question=use_question #,sys_prompt=sys_prompt
+    result = await with_iter(my_agent, question, instructions) # if not useAssistantAgent else None) #, use_question=use_question #,sys_prompt=sys_prompt
     
     d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript, 'skip?':skip_validation }
     print(f'{return_json(d)}', flush=True) if not skip_validation else print(result, flush=True) ##huh seems good to return raw text!
