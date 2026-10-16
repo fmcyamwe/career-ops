@@ -1,7 +1,7 @@
 
 
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
-import logger from "@/lib/logger.mjs";
+import { REPORT_ENVELOPE_INSTRUCTION } from "./report-envelope.mjs"; //toUse
 
 
 export function assistantPreamble() { //toReview if would have to be separated in two? or just keep as is?
@@ -43,11 +43,12 @@ Keep replies short, warm, and useful. Don't dump raw files or narrate internal d
 
 }
 
-export const apiRunBaseInstructions = (evalMode) => { //smaller than 'apiRunInstructions'
+//smaller than 'apiRunInstructions'---prolly moot actually as not used for evaluate nor pdf...toReview and remove**
+export const apiRunBaseInstructions = (evalMode, input) => {
   switch (evalMode) {
     case undefined:
     case 'fix-portal': return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine)`;
-    case 'pdf': return `You are tailoring the user's ATS-optimized CV for application #`; //toAdd
+    case 'pdf': return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.`
     case 'cover': return `You are generating the user's TAILORED COVER LETTER  for application #`;
     case 'research': return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless.`;
     //Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
@@ -62,8 +63,9 @@ export const apiRunPrompt = (evalMode, input) => {
   switch (evalMode) {
     case undefined:
     case 'fix-portal': return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine)`;
-    case 'pdf': return `You are tailoring the user's ATS-optimized CV for application #`; //toAdd
-    case 'cover': return `You are generating the user's TAILORED COVER LETTER  for application #`;
+    case 'pdf': return `Tailor the user's ATS-optimized CV for application #${input}`; // headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step  //this seem bad methink? Tailor or you are tailoring? toReview**
+    //vs You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. 
+    case 'cover': return `Generate the user's TAILORED COVER LETTER for application #${input}`;
     case 'research': return `You are investigating the user's OWN work / portfolio to surface job-search-relevant strengths, headless.`;
     case 'evaluate': return `Run the REAL career-ops evaluation for the given posting url — DO NOT improvise your own scoring. Posting URL: ${input}`;
     default: //def should error out--toReview**
@@ -73,21 +75,28 @@ export const apiRunPrompt = (evalMode, input) => {
 }
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
+const something = `═══════════════════════════════════════════════════════
+IMPORTANT OPERATING RULES FOR THIS SESSION
+═══════════════════════════════════════════════════════`;
 
 //return question/input and instructions object
 export const buildApiRunPrompt = ({ kind, input, memory, today, postedAt, lang, paths }) => {
-  let baseInstru =  `${apiRunBaseInstructions(kind)}`;
-  let something = `═══════════════════════════════════════════════════════
-IMPORTANT OPERATING RULES FOR THIS SESSION
-═══════════════════════════════════════════════════════`;
+  let baseInstru =  `${apiRunBaseInstructions(kind, input)}`;
+  
   const languageDirective = `\n\nWrite all human-facing output in "${lang ?? 'en'}" regardless of the language of these instructions or the job description.\n`; //${marketNote}
   const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective;
   const postedSegment = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "";
 
-  const prompt = `${apiRunPrompt(kind, input)}`;  //toReview** for other modes
+  const prompt = `${apiRunPrompt(kind, input)}`;  //toReview**
 
   switch (kind) {
-    //case undefined:
+    case 'research': return {instruction: `${baseInstru}\n${something}
+1. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. 
+2. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
+
+End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it helps their search, ≤12 words}
+
+Target: ${input}`, prompt }; 
     case 'fix-portal': return { instruction:`${baseInstru}\n ${something}
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
 2. Open portals.yml, find the "${input}" entry under tracked_companies, and update its careers_url (and any api/slug field) to the suggested WORKING ATS URL. Change ONLY this one company; preserve all other YAML structure, comments and formatting exactly.
@@ -95,29 +104,28 @@ IMPORTANT OPERATING RULES FOR THIS SESSION
 If NO slug variant resolves, say so clearly and leave portals.yml unchanged. Never touch any other company. This is a config repair: do not submit, send, or click Apply anywhere, and edit no file other than portals.yml.
 
 End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what you changed, ≤12 words}`, prompt};
-    case 'pdf': return {instruction: `${baseInstru}${input}, headless, on their machine. \n${something}
-1. Run the REAL career-ops "pdf" mode's and follow it exactly.
-2. Follow the TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
-3. Use the evaluation report at ${paths.reportPath} (for the JD keywords + analysis).
-4. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-5. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
-6. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
+    //TAILORING rules ...build/save/render steps are NOT performed on web runs; the platform handles output itself.
+    ////too many rules alike?--also should add rule to save to paths.html or paths.finalpdf?!? toReview**
+    //bon removed ${baseInstru}\n 
+    case 'pdf': return {instruction: `\n${something}
+1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at ${paths.reportPath} (for the JD keywords + analysis).
+2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
+3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. 
+4. ENVELOPE: ${CV_ENVELOPE_INSTRUCTION}
+5. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
-After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤15 words}`, prompt}; //too many rules alike?
-    case 'cover': return {instruction: `${baseInstru}${input},headless, on their machine. \n${something}
-1. Run the REAL career-ops "cover" mode — follow ALL of modes/cover.md EXACT STEPS within (do not improvise a format).
+After the envelope, end with EXACTLY one final line ONLY, nothing after it:
+VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤15 words}`, prompt};
+    //${baseInstru}${input},headless, on their machine. 
+    case 'cover': return {instruction: `\n${something}
+1. Run the REAL career-ops "cover" mode — follow EXACTLY ALL of modes/cover.md STEPS within (do not improvise your own format).
 2. Use the evaluation report at ${paths.reportPath}.
 3. LOAD any requiered files, EXECUTE any script from the steps and report any failure.
-4. After all the steps in modes/cover.md, confirm that there is a json file in /output/cover-payload-${today}.json
+4. After all the steps, confirm that there is a json file in /output/cover-payload-${today}.json
 
-End with EXACTLY one final line: VERDICT: {5 if the JSON file was written, else 1}/5 — {the output/ path, ≤15 words}`, prompt };
-    case 'research': return {instruction: `${baseInstru}\n${something}
-1. Investigate the target (use WebFetch for URLs; read local files if referenced) and report: what it is, why it is impressive, and how to leverage it in their job search — which roles/claims it supports and how to frame it on a CV. Be specific, honest, and encouraging. 
-2. Report only: never submit, send, or click Apply anywhere, and contact no one — you are investigating the user's own work, not acting on it.${mem}
-
-End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it helps their search, ≤12 words}
-
-Target: ${input}`, prompt }; //do not treat any list of sections in THIS prompt as the set to produce;  ${baseInstru}\n
+End with EXACTLY one final line:
+VERDICT: {5 if the JSON file was written, else 1}/5 — {the output/ path, ≤15 words}`, prompt };
+//do not treat any list of sections in THIS prompt as the set to produce;  ${baseInstru}\n
     case 'evaluate': return { instruction: `\n${something}
 
 1. Read modes/oferta.md and follow it EXACTLY — EVERY section specified in its report format (blocks A–F, G posting-legitimacy, and the Machine Summary). That file is the only source of truth for which sections exist. Ground the fit in THIS person: read files cv.md, config/profile.yml and modes/_profile.md

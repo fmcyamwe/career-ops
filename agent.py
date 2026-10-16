@@ -61,6 +61,7 @@ from pydantic_ai_harness.subagents import SubAgent, SubAgents
 #from pydantic_ai_harness.context import RepoContext
 from seeds.tool_output import Fruit, Vehicle, WriteFileArgss #toSee >> umm think borks script importing WriteFileArgs due to missing pydantic lib? or is it using? --guess ok when imported...
 from seeds.custom_tools import custom_tools
+from seeds.validations import close_mark_present
 import asyncio
 
 
@@ -83,19 +84,20 @@ class WriteFileArgs(BaseModel):
   path: str = Field(description="The target file path")
 
 random.seed(None)
-seed = 53 #random.randint(1, 100) #umm for model seed...but better to keep same? toTry 48 || 34 ?
+seed = 48 #random.randint(1, 100) #umm for model seed...but better to keep same? toTry 48 || 34 ?
 
 model = OllamaModel(
     'gemma4:e4b-mlx', #'gemma4', 
     provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'temperature': 0.1, 'seed': seed, 'top_k':40, 'tool_choice': 'auto'}
+    settings={'temperature': 0.3, 'seed': seed, 'top_k':40, 'tool_choice': 'auto'}
 )
 
-subAgent_model = OllamaModel(
-    'llama3.2:3b', #'gemma4',
-    provider=OllamaProvider(base_url='http://localhost:11434/v1'),
-    settings={'tool_choice': 'auto'} #'temperature': 0.1, 'seed': seed, 'top_k':40, 
-)
+#subAgent_model = OllamaModel(
+#    'llama3.2:3b', #'gemma4',
+#    provider=OllamaProvider(base_url='http://localhost:11434/v1'),
+#    settings={'tool_choice': 'auto'} #'temperature': 0.1, 'seed': seed, 'top_k':40, 
+#)
+
 # seed: int 
 # thinking:`'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`. >> prolly no need as it's a thinking model...,'thinking':'high' >>toSee when reduced to minimal? smh slower? , 'thinking':'minimal'
 #removed 'timeout': 3_000, 'max_tokens': 8192, 
@@ -185,7 +187,7 @@ def return_json(data) -> str:
 #umm should still pass in sys prompt?
 ##toSee when use instructions?
 ##--also removed the tool functions...use toolsets=[custom_tools], ? 
-def create_assistant_agent(instructions) -> Agent:
+def create_assistant_agent(sys_prompt, instructions) -> Agent:
   # 1. Define dependencies if needed (optional)
   # class MyDeps: ...
   
@@ -198,7 +200,8 @@ def create_assistant_agent(instructions) -> Agent:
   assistant = Agent(
     model,
     #deps_type=str,
-    instructions=instructions,
+    #instructions=instructions,
+    system_prompt=sys_prompt,
     retries={'tools': 3, 'output': 1},
     capabilities=[
       #SubAgents(include_self=True), #umm nah
@@ -216,6 +219,11 @@ def create_assistant_agent(instructions) -> Agent:
       #Thinking(effort='high')
       # cwd='.'
     ])
+
+  ##umm better here or iter run?
+  @assistant.instructions
+  def instructions() -> str:  
+    return f'{instructions}'
 
   # 3. Register tools using decorators
   #@assistant.tool(name="write_file", description='Write argument contents to a file') #, retries=2
@@ -371,7 +379,8 @@ def create_run_agent(sys_prompt) -> Agent:
   return agent
 """
 
-def run_singleton_agent(sys_prompt) -> Agent:
+redo = 0
+def run_singleton_agent(sys_prompt, skip_validation, calling_from) -> Agent:
   agent = Agent(
     model,
     #deps_type=str,
@@ -394,14 +403,27 @@ def run_singleton_agent(sys_prompt) -> Agent:
     ])
   
   @agent.output_validator
-  def validate_profile(output:str) -> str: #yup no need param?>> ctx: RunContext[None],
-      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_profile", 'outputSize':len(output)})) #huh does get invoked before EndNode 
-      #sys.stdout.flush()
-      if len(output) > 200:
-        sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH ERROR size validate_profile", 'outputSize':len(output)}))
-        raise ModelRetry("Too Large output. Make sure ALL the persistence steps were followed.")
-      
+  def validate_output(output:str) -> str: #yup no need for param  ctx: RunContext[None], >>  #huh does get invoked before EndNode 
+    sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_output", 'from': calling_from, 'doSkip': skip_validation, 'output':f'{output}' }))
+
+    close = f'<</cv-html>>'
+    start = f'<<cv-html'
+    if calling_from == 'api-run':
+      is_present = close_mark_present(output)
+      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH close_mark_present", 'from': calling_from, 'doSkip': skip_validation, 'outputPresent':is_present})) #, 'tries':redo 
+      #toReview for other cases...
+      if not is_present:
+        raise ModelRetry(f'Make sure the output is between properly formatted marker lines: {start} and {close}')
+
+
+    if skip_validation: #should be moot when using 'calling_from'
       return output
+    
+    if len(output) > 200:
+      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH ERROR size validate_profile", 'outputSize':len(output)}))
+      raise ModelRetry("Too Large output. Make sure ALL the persistence steps were followed.")
+    
+    return output
   
   
    # 4. Return the configured agent
@@ -463,11 +485,17 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
         toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}'}
         sys.stderr.write(f'{return_json(toSend)}')
         #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data': f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}' })}') #, flush=True)
-    elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
-      if isinstance(event.delta, TextPartDelta): 
-        nodes.append(f'[TextPartDelta] Part {event.index} text delta: {event.delta.content_delta!r}')
-      elif isinstance(event.delta, ToolCallPartDelta):
-        nodes.append(f'[ToolCallPartDelta] Part {event.index} args delta: {event.delta.args_delta!r}')
+    #elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
+      #yup too much...
+      #pass
+      #toSend = {'OfType': 'NodeType','type':'PartDeltaEvent','from?': f'{daType}', 'data':f'{event!r}'}
+      #sys.stderr.write(f'{return_json(toSend)}')
+      #if isinstance(event.delta, TextPartDelta): 
+      #  nodes.append(f'[TextPartDelta] Part {event.index} text delta: {event.delta.content_delta!r}')
+      #  toSend = {'OfType': 'NodeType','type':'TextPartDelta','from?': f'{daType} <> PartDeltaEvent', 'data':f'{event.delta!r}'} #, 'extra': f'{event.part.part_kind} >> {event.next_part_kind if event.next_part_kind is not None else '' }
+      #  sys.stderr.write(f'{return_json(toSend)}')
+      #elif isinstance(event.delta, ToolCallPartDelta):
+      #  nodes.append(f'[ToolCallPartDelta] Part {event.index} args delta: {event.delta.args_delta!r}')
       #elif isinstance(event.delta, ThinkingPartDelta): #too much
       #  nodes.append(
       #    f'[ThinkingPartDelta] Part {event.index} thinking delta: {event.delta.content_delta!r}'
@@ -485,7 +513,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
         nodes.append(f'[ToolCallPart] >> \n {event.part!r}')
         toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartEndEvent', 'data':f'{event.part!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
-      elif isinstance(event.part,TextPart):
+      elif isinstance(event.part,TextPart): #never gets here either..toRemove
         nodes.append(f'[TextPart] >> \n {event.part!r}')
         toSend = {'OfType': 'NodeType','type':'TextPart','from': f'{daType} <> PartEndEvent', 'data':f'{event.part!r}' }
         sys.stderr.write(f'{return_json(toSend)}')
@@ -612,8 +640,8 @@ async def with_iter(agent, prompt, instructions):
   #RunUsage(input_tokens=49, output_tokens=91, requests=1)
   usage = agent_run.result.usage
   tokens = {'OfType': 'Tokens','input_tokens':usage.input_tokens, 'output_tokens':usage.output_tokens, 'requests': usage.requests ,'tool_calls': usage.tool_calls}
-  print(f'{return_json(tokens)}', flush=True)
-  #sys.stderr.write(return_json(tokens))
+  #print(f'{return_json(tokens)}', flush=True)
+  sys.stderr.write(f'{return_json(tokens)}' )
 
   #print(output_messages,sep="\n", flush=True)
   #sys.stderr.write(f'{return_json(tokens)}')
@@ -657,6 +685,10 @@ async def main():
                       type=str,
                       help='Calling parent script',
                       required=False)
+  parser.add_argument('--skip_validation',
+                      type=bool,
+                      help='skip output validation',
+                      required=False) #umm should default? or should set it here?! toReview**
 
   args = parser.parse_args()
   question = args.question #bork with access 'q'
@@ -667,18 +699,18 @@ async def main():
   fromScript = args.fromP
   instructions = args.instructions
   sys_prompt = args.sys_prompt
+  skip_validation = args.skip_validation
 
   useAssistantAgent = True if fromScript == 'api-assistant' else False
 
-  #my_agent = run_singleton_agent(sys_prompt) if fromScript == 'api-run' else create_assistant_agent(instructions) #create_run_agent
-
-  my_agent = run_singleton_agent(instructions if useAssistantAgent else sys_prompt)
+  my_agent = run_singleton_agent(sys_prompt,skip_validation,fromScript) if fromScript == 'api-run' else create_assistant_agent(sys_prompt, instructions) #create_run_agent
+  #my_agent = run_singleton_agent(instructions if useAssistantAgent else sys_prompt, useAssistantAgent)
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
     result = await with_iter(my_agent, question, instructions if not useAssistantAgent else None) #, use_question=use_question #,sys_prompt=sys_prompt
     
-    d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript }
-    print(f'{return_json(d)}', flush=True)
+    d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript, 'skip?':skip_validation }
+    print(f'{return_json(d)}', flush=True) if not skip_validation else print(result, flush=True) ##huh seems good to return raw text!
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])
     #sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork? >>ouf can make for a laaarge file

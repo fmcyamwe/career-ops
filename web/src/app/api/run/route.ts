@@ -7,8 +7,7 @@ import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates } f
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
-import { basePrompt, buildSysPrompt, apiRunSesshInstructions } from "@/lib/ollama-prompts.mjs"; //Olama system prompts
-import { buildApiRunPrompt } from "@/lib/ollama-agent-prompts.mjs";
+import { buildApiRunPrompt, basePrompt } from "@/lib/ollama-agent-prompts.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
@@ -124,7 +123,7 @@ export async function POST(req: Request) {
   // from this run's freshly parsed envelope before any render, and the agent is
   // no longer told these paths, so a stale file cannot survive into a render.
   let pdfPaths: PdfPaths | undefined;
-  if (kind === "pdf") { //todo** add "cover" prolly
+  if (kind === "pdf") { //todo** add "cover" prolly--which would requiere generated pdf beforehand?
     const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
     if (!pathsResult.ok) {
       logger.error(`ERROR No resolvePdfPaths for ${kind} !!`, {input: input, in: careerOpsRoot()});
@@ -134,7 +133,7 @@ export async function POST(req: Request) {
       });
     }
     pdfPaths = pathsResult.paths;
-    logger.info(`resolvePdfPaths ${kind} >>`, {...pdfPaths});
+    //logger.info(`resolvePdfPaths ${kind} >>`, {...pdfPaths});
     //"html":"/Users/florentcyamweshi/Downloads/career-ops/.career-ops-web/pdf-tmp/cv-web-14.html",
     // "reportPath":"reports/014-1password-2026-09-18.md",
     // "finalPdf":"/Users/florentcyamweshi/Downloads/career-ops/output/cv-florent-cyamweshi-1password-2026-09-18.pdf"
@@ -157,11 +156,11 @@ export async function POST(req: Request) {
   let question = ''
 
   if(isOllama){
-    sysPrompt = basePrompt(); //oldie but goes over the context smh //buildSysPrompt(kind, "apiRun");
+    sysPrompt = basePrompt(); //oldie but goes over the context --redundant smh //buildSysPrompt(kind, "apiRun");
     //buildSysPrompt(kind, "apiRun"); // redundant == ~49K
     //instructions = apiRunSesshInstructions(opts);  //obsolete
     const { instruction, prompt } = buildApiRunPrompt(opts); 
-    logger.info(`prompts: ${prompt} >>`); //, {instruction}
+   //logger.info(`prompt for ${kind}: ${prompt} >>`); //,  ${instruction}
     instructions = instruction || "";
     question = prompt || "";
   }
@@ -201,6 +200,8 @@ export async function POST(req: Request) {
       tools.disallowed,
       '--fromP',
       'api-run',
+      '--skip_validation',
+      kind === "pdf" ? 'true' : 'false'
     ]
     : spec.args(prompt);
 
@@ -224,10 +225,10 @@ export async function POST(req: Request) {
 
   const filePath = path.join(careerOpsRoot(), `api-run-${kind}.log`);
   //console.log(`🤖  Run:::POST on kind:${kind} >> ${isOllama} >> ${reportsBefore}....\n`,prompt);
-  let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt}
-  logger.info("🤖 api-Run::POST", {...lo}) 
+  let lo = {on: kind, as: cliId, input: input, reports: reportsBefore.length, toPersist: persists, postedAt: postedAt, pdfs: pdfPaths? {...pdfPaths} : "None"}
+  logger.info("🤖 api-Run::POST", {...lo}) //remove**
 
-  logger.toFile(filePath, `\n Start: ${instructions} \n\n with context: \n ${prompt} \n`)
+  logger.toFile(filePath, `\n Start: ${instructions} \n\n with prompt: \n ${prompt} \n\n and context: ${lo} `)
   
 
   const child = isOllama ? 
@@ -362,7 +363,7 @@ export async function POST(req: Request) {
       const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
         const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
         //if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) }); //should be this and send error to frontend..todo**
-        !written.ok ?  logger.info("🤖 saveCv --Boo Error", {kind: kind, error: written.error.slice(0, 200), paths: paths, envelope: envelope}) : logger.info("🤖 saveCv --YEEEYUH", {kind: kind, paths: paths, envelope: envelope}); 
+        !written.ok ?  logger.info("🤖 saveCv --Boo Error", {kind: kind, error: written.error.slice(0, 200), paths: paths, envelope: envelope}) : logger.info("🤖 saveCv --YEEEYUH", {kind: kind, paths: paths, saved:written}); 
         return written.ok;
       };
 
@@ -376,6 +377,7 @@ export async function POST(req: Request) {
           // backend has nothing to save and the 25 KB body floods the run log (#2185).
           sendAgentText(ev.text);
         }
+        
         if (ev?.tool) send({ type: "tool", name: ev.tool });
         if (ev?.status) send({ type: "status", label: ev.status });
         // Accumulated, not assigned: usage events are per-turn, so overwriting made a
@@ -389,18 +391,35 @@ export async function POST(req: Request) {
         }
       };
 
-      const saveTokens = (s: string) =>{
+      const saveTokens = (s: string) =>{ //moot--toRemove**
         if (/input_tokens|output_tokens/im.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
           let usage;
           try { 
             usage = JSON.parse(s)
             lastTokens = (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-            lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG..toFix**
+            lastCostUsd = (usage.requests || 0) + (usage.tool_calls || 0) //WRONG...bof
           }catch(e) { 
             logger.error(`🤖 saveTokens >> ERROR json!!`, {data: `${s} \n`});
           };
         }
+      }
+
+      const parseVerdictLine = (line: string) =>{ 
+        //first separate verdictLine from output..for pdf mode...
+        const CLOSER_SRC = String.raw`VERDICT`;
+        const CLOSER = new RegExp(CLOSER_SRC, "gm");
+
+        const vm = line.match(/VERDICT:[^\n]*/i); //from verdict till end of line
+        const closer = CLOSER.exec(line);
+
+        if (closer && vm) {
+          const html = line.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
+          logger.error("🤖 parseVerdictLine >>some Verdict?", { vm: vm, closer: closer, html: html})
+          sendAgentText(html); //toSee
+          send({ type: "text", text: vm[0] }); //closer[0]
+        }
+        
       }
       
       //for info..and results?
@@ -410,43 +429,45 @@ export async function POST(req: Request) {
           oContent = JSON.parse(line);
           let OfType = oContent.OfType || undefined
           switch (OfType) {
-            case undefined: return logger.error("🤖 streamNodeInfo ERROR?--undefined OfType", {content:  line});
+            case undefined: return logger.error("🤖 streamNodeInfo ERROR?--undefined OfType", {content:  line}); 
             case 'Result': send({ type: "text", text: `${oContent.output ?? 'Nothing?'}` });
-            case 'Tokens': return saveTokens(line);
+            //case 'Tokens': return saveTokens(line);
             case 'Info': return logger.toFile(filePath, `\n ${line} \n`);
             default:
               logger.error("🤖 streamNodeInfo >>ERROR?--No OfType", { closed: closed, cli: cliId, content:line})
           }
         } catch {
-          console.error(`\n🤖   streamNodeInfo >>Ollama...ERROR json!! \n ${line} \n`);
+          console.error(`\n🤖   streamNodeInfo >>Ollama...ERROR json!! \n ${line.slice(0, 300)} \n`);
+
+          //just to See--toReview** if shouldnt be above?
+          if(kind === "pdf"){
+            if (/cv-html|VERDICT/im.test(line)) {
+              parseVerdictLine(line)
+            }
+          }
         }
       }
-
-      /*const streamNodeAction = (node: any) => { //todo** move this into run-cli-support.mjs
-        let type = node.type || "";
-        let data = node.data || "No data" ; 
-            //skip for 'UserPromptNode'  && 'ModelRequestNode' && 'CallToolsNode' ? 
-            //FunctionToolResultEvent as status? >> use ToolReturnPart instead? ..prolly both
-        if (type == 'UserPromptNode' || type == 'FinalResultEvent' || type == 'FinalEndNode' ||  type == 'PartEndEvent' ){
-          logger.info(`🤖 ${type}`, node);
-          return
-        }
-        
-        sendAgentText(`${type} : ${data}`)
-        //use if and build object...
-        let toSend = type == 'ToolCallPart' ? 'tool' : type == 'FunctionToolCallEvent' ? 'status' : 'text' //|| type == 'PartEndEvent'
-        send({ type: toSend, label: `${toSend}`, name: `${data}` });
-        emittedText = true;
-      }*/
       
       const parseOllamaEvt = (line: string) => {
-        //if (!spec.parseEvent) return;
-        //const ev = spec.parseEvent(line);
-        ////status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
         if(spec.parseEvent){
           const ev = spec.parseEvent(line);
           if(ev){
             console.error(ev);
+            if(Object.keys(ev).length < 1){
+              logger.error("🤖 parseOllamaEvt--empty object eh", { example: line.slice(0, 200)})
+              return 
+            }
+            if(ev.status == "Info"){
+              logger.error("🤖 parseOllamaEvt--Info object eh",{...ev})
+              return
+            }
+
+            if (ev.tokens && ev.costUsd){
+              lastTokens = ev.tokens;
+              lastCostUsd = ev.costUsd;
+              //umm return prolly here...
+            }
+
             emittedText = true;
             return send({...ev});
           }else{
@@ -460,6 +481,7 @@ export async function POST(req: Request) {
         if (closed) return;
         if (isOllama){
           logger.info("🤖  stream::apiRun::onData", { size: d.length})
+          logger.toFile(filePath, `\n ${d.toString()} \n`);
           return streamNodeInfo(d.toString('utf-8'));
         }
 
@@ -540,10 +562,10 @@ export async function POST(req: Request) {
         
         if(kind === "pdf"){
           const tail = cvFilter?.flush();
-          if (tail) {logger.info("🤖 tailzzz", {content: tail, pdfs:pdfPaths}) ;send({ type: "text", text: tail }); }
+          if (tail) {logger.error("🤖 tailzzz", {content: tail, pdfs:pdfPaths}) ;send({ type: "text", text: tail }); }
 
           const envelope = cvFilter?.result();
-          if (envelope) logger.info("🤖 cvEnvelope PRESENT!", {content: envelope,  pdfs:pdfPaths});
+          if (envelope) logger.info("🤖 cvEnvelope PRESENT!", {content: envelope.ok,  pdfs:pdfPaths, other:sawError + ' '+ cleanExit});
           const outcome = pdfRunOutcome({
             envelope,
             noOutputMessage: null, //toReview** //noOutputError(),
@@ -565,7 +587,7 @@ export async function POST(req: Request) {
           } else {
             sendWarnings(envelope.warnings);
             if (saveCv(pdfPaths, envelope)) {
-              logger.info("🤖 WOOH saved CV..now rendering PDF", {envelope: envelope, pdfs:pdfPaths});
+              logger.info(`🤖 WOOH saved html to ${pdfPaths.html}} \n...now rendering PDF`);
               // Tracked so cancel() can defer releasing writeToken until this
               // settles; close() happens once rendering finishes, not here.
               pdfRenderPromise = renderPdf(pdfPaths, envelope.format); 
@@ -625,6 +647,9 @@ export async function POST(req: Request) {
             format,
             reportNum: input,
           });
+
+          logger.info("🔗 YEEEYuh done rendering PDF..success?", {...result})
+
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 200) });
             return;

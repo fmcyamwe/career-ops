@@ -380,7 +380,7 @@ function streamNodeAction(node) {
     case 'UserPromptNode': return { type: "text", text: data };
     case 'FinalResultEvent': return { type: "status", label: data };
     case 'TextPart': return { type: "text", text:data};
-    case 'FinalEndNode': return { type: "status", label: data };
+    case 'FinalEndNode': return {}; //{ type: "status", label: data }; //too much
     case 'ToolCallPart': return { type: 'tool', name: etype, text: data };
     case 'FunctionToolCallEvent': return { type: 'tool', name: etype, text: data }; 
     case 'FunctionToolResultEvent': return { type: 'tool', name: etype, text: data };
@@ -415,15 +415,15 @@ export function parseOllamaEvent(line) {
   if (!evt || typeof evt !== "object") return null;
 
   const OfType = OEvTypes.find((t) => t == evt.OfType);
-  if (!OfType) {return null } //logger.error("🤖 parseEvent ERROR?--undefined OfType", {content: line.slice(0, 100)});
+  if (!OfType) {return {} } 
 
   switch (OfType) { //status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string 
-    case 'Result': return { type: "text", text: evt.output, status : "done" }; //moot..same as below
-    case 'Tokens': return { type: "status", label: 'tokens',  tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd ..toFix**
+    case 'Result': return { type: "text", text: evt.output, status : "done" }; //moot
+    case 'Tokens': return { tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd..meh..
     case 'NodeType': return streamNodeAction(evt);
+    case 'Info': return { status: "Info", text: evt.type || evt.Text}; //toSee
     default:
-      //return { text: evt.data }; //default or return null below?
-      logger.error("🤖 parseEvent DEFAULT?--OfType",line)
+      logger.error("🤖 parseEvent DEFAULT?--OfType"+ evt.OfType,line.length)
   }
 
   return null;

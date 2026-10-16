@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
-import { assistantPreamble } from "@/lib/ollama-agent-prompts.mjs";
+import { assistantPreamble, basePrompt } from "@/lib/ollama-agent-prompts.mjs";
 import logger from "@/lib/logger.mjs"
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
@@ -54,6 +54,7 @@ export async function POST(req: Request) {
     : `\n\nSETUP STATE: this user is fully set up (CV + profile + scanner all on file). Do NOT run onboarding or ask for a CV — just help them with what they actually asked.`;
   const prompt = `${assistantPreamble()}${setupLine}${memoryLine}${pageLine}\n\n--- Conversation ---\n${convo}\nUser: ${message}\nAssistant:`;
 
+
   // Claude Code streams token-level deltas via stream-json + partial messages.
   // Other CLIs: pass their stdout through raw.
   // The chat CLI is READ-ONLY: all writes go through gated registry actions
@@ -61,6 +62,8 @@ export async function POST(req: Request) {
   // files directly. Scope its tools so it can advise (read) but not blind-write.
   const isClaude = cliId === "claude";
   const isOllama = cliId === "ollama";
+
+  const sysPrompt = isOllama ? basePrompt() : '';
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
   const args = isClaude
@@ -89,6 +92,8 @@ export async function POST(req: Request) {
         `${message}`,
         '--instructions',
         `${prompt}`,
+        '--sys_prompt',
+        `${sysPrompt}`,
         '--fromP',
         'api-assistant',
         //also allowedTools && disallowedTools? prolly...todo**

@@ -74,7 +74,7 @@ async def read_file(ctx: RunContext[Any], fpath: str) -> str:
     # Custom validation or logging   #=Path(self.root_dir), 
     real_path = os.path.join(os.getcwd(),fpath)
     conte = read_from_file(real_path)
-    print(f'\ncustom_read_file:',len(conte))
+    #print(f'\ncustom_read_file: {len(conte)}',flush=True)
     #cont = await ctx.emit(CustomReadEvent(path=real_path, content=conte))
     #print(f'\ncustom_read_file:', fpath, Path.cwd(), real_path, conte, cont) #kLawGen/backend
     return conte #.content
