@@ -84,7 +84,7 @@ export async function POST(req: Request) {
   const { sessionId, cliId } = body;
   const t0 = Date.now();
   const encoder = new TextEncoder();
-  const logPath = path.join(careerOpsRoot(), ".career-ops-web", "apply-prefill.log");
+  const logPath = path.join(careerOpsRoot(), ".career-ops-web", `apply-prefill${sessionId}.log`);
   try {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
   } catch {

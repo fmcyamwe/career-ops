@@ -145,7 +145,7 @@ export async function agentInterpretForm(frame: Frame, cliId: string, title: str
   if (!cands.length) return [];
 
   const isOllama = cliId === "ollama"; // === "claude"
-  const out = await runPlanner(isOllama? 'uv' : resolved.binPath, cliId, resolved.spec.args, buildPrompt(title, cands));
+  const out = await runPlanner(isOllama ? 'uv' : resolved.binPath, cliId, resolved.spec.args, buildPrompt(title, cands));
   const m = out.match(/\[[\s\S]*\]/);
   if (!m) return [];
   let parsed: Interpreted[];

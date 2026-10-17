@@ -200,8 +200,8 @@ export async function POST(req: Request) {
       tools.disallowed,
       '--fromP',
       'api-run',
-      '--skip_validation',
-      kind === "pdf" ? 'true' : 'false'
+      '--validation_kind',
+      kind //=== "pdf" ? 'true' : 'false'
     ]
     : spec.args(prompt);
 
@@ -236,7 +236,7 @@ export async function POST(req: Request) {
   //spawn('node',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
   spawn('uv',args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe' , 'pipe'] })
   //spawnHeadlessCli('uv', args, { cwd: careerOpsRoot(), stdio: ['pipe', 'pipe', 'pipe', 'pipe']  }) //this? as >> stdin must reach EOF or the CLI waits on piped input that never comes...
-  : 
+  :
   //spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
   spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
 
@@ -391,7 +391,7 @@ export async function POST(req: Request) {
         }
       };
 
-      const saveTokens = (s: string) =>{ //moot--toRemove**
+      /*const saveTokens = (s: string) =>{ //moot--toRemove**
         if (/input_tokens|output_tokens/im.test(s)) {
           //try to save the tokens?--should skip if seen multiple times...use lastCostUsd as flag? toReview**
           let usage;
@@ -403,7 +403,7 @@ export async function POST(req: Request) {
             logger.error(`🤖 saveTokens >> ERROR json!!`, {data: `${s} \n`});
           };
         }
-      }
+      }*/
 
       const parseVerdictLine = (line: string) =>{ 
         //first separate verdictLine from output..for pdf mode...

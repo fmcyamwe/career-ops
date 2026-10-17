@@ -124,7 +124,7 @@ export async function POST(req: Request) {
         'agent.py',
         '--question',
         `${promptSource}`,
-        '--prompt',
+        '--instructions',
         `${prompt}`,
         '--fromP',
         'cvIngest',

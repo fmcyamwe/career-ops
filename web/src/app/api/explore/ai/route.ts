@@ -81,7 +81,7 @@ export async function POST(req: Request) {
         'agent.py',
         '--question',
         `${query}`,
-        '--prompt',
+        '--instructions',
         `${prompt}`,
         '--fromP',
         'apiExplore',

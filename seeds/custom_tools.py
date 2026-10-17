@@ -32,6 +32,9 @@ def read_from_file(filePath):
     except OSError as e:
       # Transient — model should retry (e.g. file lock)
       raise ModelRetry(f"Transient error writing {filePath}: {e}. Retry in a moment.")
+    except FileNotFoundError as e:
+      raise ToolFailed(f"The file does not exit at {filePath}. Skip it")
+
 
 
 # 1. Define the custom toolset

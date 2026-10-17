@@ -381,7 +381,7 @@ def create_run_agent(sys_prompt) -> Agent:
 """
 
 redo = 0
-def run_singleton_agent(sys_prompt, skip_validation, calling_from) -> Agent:
+def run_singleton_agent(sys_prompt, validation_type, calling_from) -> Agent:
   agent = Agent(
     model,
     #deps_type=str,
@@ -405,24 +405,22 @@ def run_singleton_agent(sys_prompt, skip_validation, calling_from) -> Agent:
   
   @agent.output_validator
   def validate_output(output:str) -> str: #yup no need for param  ctx: RunContext[None], >>  #huh does get invoked before EndNode 
-    sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_output", 'from': calling_from, 'doSkip': skip_validation, 'output':f'{len(output)}' }))
+    sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH validate_output", 'from': calling_from, 'validationType': validation_type, 'output':f'{len(output)}' }))
 
     close = f'<</cv-html>>'
     start = f'<<cv-html'
     if calling_from == 'api-run':
-      is_present = close_mark_present(output)
-      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH close_mark_present", 'from': calling_from, 'doSkip': skip_validation, 'outputPresent':is_present, 'output':f'{output}' if not is_present else 'Good...'})) #, 'tries':redo 
-      #toReview for other cases...
-      if not is_present:
-        raise ModelRetry(f'Make sure the output is between properly formatted marker lines: {start} and {close}')
-
-
-    if skip_validation: #should be moot when using 'calling_from'
-      return output
-    
-    if len(output) > 200:
-      sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH ERROR size validate_profile", 'outputSize':len(output)}))
-      raise ModelRetry("Too Large output. Make sure ALL the persistence steps were followed.")
+      if validation_type == 'pdf':
+        is_present = close_mark_present(output)
+        sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH close_mark_present", 'from': calling_from, 'validationType': validation_type, 'outputPresent':is_present, 'output':f'{output}' if not is_present else 'Good...'})) 
+        if not is_present:
+          raise ModelRetry(f'Make sure the output is between PROPERLY FORMATTED marker lines: {start} and {close}')
+        return output 
+      elif validation_type == 'evaluate':
+        if len(output) > 200:
+          sys.stderr.write(return_json({'OfType': 'Info', 'Text': "WOAH ERROR size validate_output", 'output':f'{output}'}))
+          raise ModelRetry("Too Large output. Make sure ALL the persistence steps were followed.")
+        return output
     
     return output
   
@@ -477,16 +475,16 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
   try:
     if isinstance(event, FinalResultEvent):
       toSend = {'OfType': 'NodeType','type':'FinalResultEvent', 'from': f'{daType}' , 'data':f'({event!r})' }
-      sys.stderr.write(return_json(toSend))
+      sys.stderr.write(f'{return_json(toSend)}')
       return #just to not go below....   
     if isinstance(event, PartStartEvent):
       nodes.append(f'[Request] Starting part {event.index}: {event!r} \n')
-      if isinstance(event.part, ToolCallPart): #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
-        nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
-        toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name} <> {event.part.args}', 'fromPrevious': f'{event.previous_part_kind}'}
-        sys.stderr.write(f'{return_json(toSend)}')
+      #if isinstance(event.part, ToolCallPart):#redundant as also in PartEndEvent below  #ToolSearchCallPart | LoadCapabilityCallPart | ToolCallPart
+      #  nodes.append(f'===[ToolCallPart] Tool {event.part.args}: {event.part.tool_name!r}==== previous >> {event.previous_part_kind}')
+      #  toSend = {'OfType': 'NodeType','type':'ToolCallPart','from': f'{daType} <> PartStartEvent', 'data':f'{event.part.tool_name} <> {event.part.args}', 'fromPrevious': f'{event.previous_part_kind}'}
+      #  sys.stderr.write(f'{return_json(toSend)}')
         #sys.stderr.write(f'{return_json({'OfType': 'NodeType','type':'ToolCallPart','from': daType, 'data': f'{event.part.tool_name}', 'fromPrevious': f'{event.previous_part_kind}' })}') #, flush=True)
-    #elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
+    # elif isinstance(event, PartDeltaEvent): #TextPartDelta | ThinkingPartDelta | ToolCallPartDelta | SpeechPartDelta
       #yup too much...
       #pass
       #toSend = {'OfType': 'NodeType','type':'PartDeltaEvent','from?': f'{daType}', 'data':f'{event!r}'}
@@ -524,8 +522,8 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
         sys.stderr.write(f'{return_json(toSend)}')
     elif isinstance(event,FunctionToolCallEvent):
       nodes.append(f'[FunctionToolCallEvent] Args => {event!r}')
-      toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data':f'{event!r}' } #'data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}')
-      sys.stderr.write(f'{return_json(toSend)}')
+      #toSend = {'OfType': 'NodeType','type':'FunctionToolCallEvent','from': daType, 'data':f'{event!r}' } #'data': f'{event.part.tool_name} with Args => {event.part.args!r} ' })}')
+      #sys.stderr.write(f'{return_json(toSend)}')
       if isinstance(event.part, ToolReturnPart): #prolly dont get here either as ToolReturn is handled below...
         nodes.append(f'[ToolReturnPart] huh? From {event.part.tool_name} with contents? => {event.part.has_content()}')
         toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event.part.tool_name} with contents? => {event.part.has_content()}' }
@@ -533,7 +531,7 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
       elif isinstance(event.part, ToolCallPart):
         nodes.append(f'[ToolCallPart] From {event.part!r}')
         toSend = {'OfType': 'NodeType','type': 'ToolCallPart','from': f'{daType} <> FunctionToolCallEvent', 'data': f'{event.part.tool_name} <> {event.part.args}'} #f'{event.part!r}'
-        sys.stderr.write(return_json(toSend))
+        sys.stderr.write(f'{return_json(toSend)}')
       else:
         nodes.append(f'[FunctionToolCallEvent..huh unknown?] >> \n {event.part!r}')
         toSend = {'OfType': 'NodeType','type':'Unknown?','from': f'{daType} <> FunctionToolCallEvent', 'data':f'{event!r}' }
@@ -543,8 +541,9 @@ def record_event(event: AgentStreamEvent, daType:str) -> None:
       sys.stderr.write(f'{return_json({'OfType': 'NodeType', 'from': daType, 'type':'FunctionToolResultEvent', 'on': f'{event.part.timestamp!r}' ,'data': f'{event.part.tool_name!r} => {len(repr(event.part))}' })}') #, flush=True) #{event.part.content!r}
       if isinstance(event.part, ToolReturnPart):
         nodes.append(f'====[ToolReturnPart] Part >> {event.part!r}')
-        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolResultEvent', 'data': f'{event.part.tool_name!r} <> {len(event.part.content)}' } #f'{event.part!r}'
-        sys.stderr.write(return_json(toSend))
+        toSend = {'OfType': 'NodeType','type':'ToolReturnPart','from': f'{daType} <> FunctionToolResultEvent', 'data': f'{repr(event.part.tool_name)} <> {len(event.part.content)}' } #f'{event.part!r}'
+        sys.stderr.write(f'{return_json(toSend)}')
+        return
       elif isinstance(event.part,RetryPromptPart):
         nodes.append(f'====[RetryPromptPart] Part >> {event.part!r}')
         toSend = {'OfType': 'NodeType','type':'RetryPromptPart','from': f'{daType} <> FunctionToolResultEvent', 'data':f'{event.part!r}' }
@@ -686,10 +685,10 @@ async def main():
                       type=str,
                       help='Calling parent script',
                       required=False)
-  parser.add_argument('--skip_validation',
-                      type=bool,
-                      help='skip output validation',
-                      required=False) #umm should default? or should set it here?! toReview**
+  parser.add_argument('--validation_kind',
+                      type=str,
+                      help='output validation to check',
+                      required=False) #umm should default? or should set it here?! was bool flag 'skip_validation' but validation only for api-run
 
   args = parser.parse_args()
   question = args.question #bork with access 'q'
@@ -700,18 +699,18 @@ async def main():
   fromScript = args.fromP
   instructions = args.instructions
   sys_prompt = args.sys_prompt
-  skip_validation = args.skip_validation
+  validation_type = args.validation_kind
 
   useAssistantAgent = True if fromScript == 'api-assistant' else False
 
-  my_agent = run_singleton_agent(sys_prompt,skip_validation,fromScript) if fromScript == 'api-run' else create_assistant_agent() # sys_prompt if sys_prompt is not None else instructions, instructions #create_run_agent
+  my_agent = run_singleton_agent(sys_prompt,validation_type,fromScript) if fromScript == 'api-run' else create_assistant_agent() # sys_prompt if sys_prompt is not None else instructions, instructions #create_run_agent
   #my_agent = run_singleton_agent(instructions if useAssistantAgent else sys_prompt, useAssistantAgent)
   try:
     #ask_question(question,prompt) if fromScript == 'api-assistant' else delegate_question(prompt, fromScript)
     result = await with_iter(my_agent, question, instructions) # if not useAssistantAgent else None) #, use_question=use_question #,sys_prompt=sys_prompt
     
-    d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript, 'skip?':skip_validation }
-    print(f'{return_json(d)}', flush=True) if not skip_validation else print(result, flush=True) ##huh seems good to return raw text!
+    d = {'OfType': 'Result','daQ':question,'output':result, 'from':fromScript, 'validation_type':validation_type }
+    print(f'{return_json(d)}', flush=True) #if not skip_validation else print(result, flush=True) ##huh seems good to return raw text!
     #parts = model.last_model_request_parameters.instruction_parts or []
     #print([(part.name, str(part.id) if part.id is not None else None, part.content) for part in parts])
     #sys.stderr.write(f'\n\n {return_json({'NODES':repr(nodes)})}') #umm wont bork? >>ouf can make for a laaarge file
@@ -719,6 +718,7 @@ async def main():
   except ValidationError as e:
     # Catch only if retries exhausted (max_retries=3 is default)--toSee
     print(f'Error::with_iter >> Validation failed after retries: {e!r}')
+    
   except Exception as e:
     #sys.stderr.write('\n\n\n[%s] %s :: \n %s ...\n' % ("Info:Tools", 'What tools are available?',result.output))
     print('An error occurred::with_iter >>',repr(e.args),repr(e.__class__), f'{e.__traceback__!r}')

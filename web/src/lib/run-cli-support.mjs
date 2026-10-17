@@ -421,7 +421,7 @@ export function parseOllamaEvent(line) {
     case 'Result': return { type: "text", text: evt.output, status : "done" }; //moot
     case 'Tokens': return { tokens: (evt.input_tokens || 0) + (evt.output_tokens || 0) + (evt.cache_creation_input_tokens || 0) , costUsd: (evt.requests || 0) + (evt.tool_calls || 0)}; //WRONG costUsd..meh..
     case 'NodeType': return streamNodeAction(evt);
-    case 'Info': return { status: "Info", text: evt.type || evt.Text}; //toSee
+    case 'Info': return { status: "Info", ...evt}; //text: evt.type || evt.Text
     default:
       logger.error("🤖 parseEvent DEFAULT?--OfType"+ evt.OfType,line.length)
   }
